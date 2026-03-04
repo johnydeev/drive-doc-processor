@@ -1,0 +1,134 @@
+
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ClientRole {
+  ADMIN
+  CLIENT
+}
+
+model Client {
+  id                   String           @id @default(cuid())
+  name                 String
+  email                String           @unique
+  passwordHash         String
+  role                 ClientRole       @default(CLIENT)
+  isActive             Boolean          @default(true)
+  driveFolderPending   String?
+  driveFolderProcessed String?
+  googleConfigJson     Json?
+  extractionConfigJson Json?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  invoices             Invoice[]
+  processingLogs       ProcessingLog[]
+  schedulerStates      SchedulerState[]
+  tokenUsages          TokenUsage[]
+
+  @@index([isActive])
+  @@index([role, isActive])
+}
+
+model Invoice {
+  id                String    @id @default(cuid())
+  clientId          String
+  documentHash      String
+  boletaNumber      String?
+  provider          String?
+  consortium        String?
+  providerTaxId     String?
+  detail            String?
+  observation       String?
+  dueDate           DateTime?
+  amount            Decimal?  @db.Decimal(14, 2)
+  alias             String?
+  driveFileId       String?
+  sourceFileUrl     String?
+  isDuplicate       Boolean   @default(false)
+  boletaNumberNorm  String    @default("")
+  providerTaxIdNorm String    @default("")
+  consortiumNorm    String    @default("")
+  dueDateNorm       String    @default("")
+  amountNorm        String    @default("")
+  detailNorm        String    @default("")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  client            Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, documentHash], map: "uq_invoice_document_hash")
+  @@unique([clientId, boletaNumberNorm, providerTaxIdNorm, consortiumNorm, dueDateNorm, amountNorm], map: "uq_invoice_business_key")
+  @@index([clientId, createdAt])
+}
+
+model ProcessingLog {
+  id           String    @id @default(cuid())
+  clientId     String
+  trigger      String
+  status       String
+  startedAt    DateTime
+  endedAt      DateTime?
+  durationMs   Int?
+  summaryJson  Json?
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  client       Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, startedAt])
+}
+
+model SchedulerState {
+  id                String    @id @default(cuid())
+  clientId          String
+  enabled           Boolean   @default(true)
+  isRunning         Boolean   @default(false)
+  intervalMinutes   Int       @default(5)
+  lastTrigger       String?
+  lastRunStartedAt  DateTime?
+  lastRunEndedAt    DateTime?
+  lastHeartbeatAt   DateTime?
+  lastError         String?
+  lastSummaryJson   Json?
+  totalRuns         Int       @default(0)
+  totalFound        Int       @default(0)
+  totalProcessed    Int       @default(0)
+  totalSkipped      Int       @default(0)
+  totalFailed       Int       @default(0)
+  totalDuplicates   Int       @default(0)
+  totalInputTokens  Int       @default(0)
+  totalOutputTokens Int       @default(0)
+  totalTokens       Int       @default(0)
+  quotaOpenAiStatus String    @default("unknown")
+  quotaOpenAiNote   String?
+  quotaGeminiStatus String    @default("unknown")
+  quotaGeminiNote   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  client            Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId])
+}
+
+model TokenUsage {
+  id           String   @id @default(cuid())
+  clientId     String
+  provider     String
+  model        String?
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  totalTokens  Int      @default(0)
+  runAt        DateTime @default(now())
+  metaJson     Json?
+  createdAt    DateTime @default(now())
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, runAt])
+  @@index([provider])
+}
