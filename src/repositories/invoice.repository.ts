@@ -71,7 +71,6 @@ export class InvoiceRepository {
         clientId,
         boletaNumberNorm: parts.boletaNumberNorm,
         providerTaxIdNorm: parts.providerTaxIdNorm,
-        consortiumNorm: parts.consortiumNorm,
         dueDateNorm: parts.dueDateNorm,
         amountNorm: parts.amountNorm,
       },
@@ -123,10 +122,8 @@ export class InvoiceRepository {
           alias: input.extraction.alias,
           boletaNumberNorm: parts.boletaNumberNorm,
           providerTaxIdNorm: parts.providerTaxIdNorm,
-          consortiumNorm: parts.consortiumNorm,
           dueDateNorm: parts.dueDateNorm,
           amountNorm: parts.amountNorm,
-          detailNorm: parts.detailNorm,
         },
         update: {
           driveFileId: input.fileId,
@@ -143,10 +140,8 @@ export class InvoiceRepository {
           alias: input.extraction.alias,
           boletaNumberNorm: parts.boletaNumberNorm,
           providerTaxIdNorm: parts.providerTaxIdNorm,
-          consortiumNorm: parts.consortiumNorm,
           dueDateNorm: parts.dueDateNorm,
           amountNorm: parts.amountNorm,
-          detailNorm: parts.detailNorm,
         },
       });
 
@@ -186,10 +181,8 @@ export class InvoiceRepository {
       businessKey: buildBusinessKeyString({
         boletaNumberNorm: invoice.boletaNumberNorm,
         providerTaxIdNorm: invoice.providerTaxIdNorm,
-        consortiumNorm: invoice.consortiumNorm,
         dueDateNorm: invoice.dueDateNorm,
         amountNorm: invoice.amountNorm,
-        detailNorm: invoice.detailNorm,
       }),
     };
   }

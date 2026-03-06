@@ -55,16 +55,14 @@ model Invoice {
   isDuplicate       Boolean   @default(false)
   boletaNumberNorm  String    @default("")
   providerTaxIdNorm String    @default("")
-  consortiumNorm    String    @default("")
   dueDateNorm       String    @default("")
   amountNorm        String    @default("")
-  detailNorm        String    @default("")
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   client            Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@unique([clientId, documentHash], map: "uq_invoice_document_hash")
-  @@unique([clientId, boletaNumberNorm, providerTaxIdNorm, consortiumNorm, dueDateNorm, amountNorm], map: "uq_invoice_business_key")
+  @@unique([clientId, boletaNumberNorm, providerTaxIdNorm, dueDateNorm, amountNorm], map: "uq_invoice_business_key")
   @@index([clientId, createdAt])
 }
 

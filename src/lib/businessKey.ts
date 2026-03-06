@@ -3,10 +3,8 @@
 export interface BusinessKeyParts {
   boletaNumberNorm: string;
   providerTaxIdNorm: string;
-  consortiumNorm: string;
   dueDateNorm: string;
   amountNorm: string;
-  detailNorm: string;
 }
 
 export function normalizeBusinessText(value: unknown): string {
@@ -59,10 +57,8 @@ export function buildBusinessKeyParts(data: ExtractedDocumentData): BusinessKeyP
   return {
     boletaNumberNorm: normalizeBusinessText(data.boletaNumber),
     providerTaxIdNorm: normalizeBusinessText(data.providerTaxId),
-    consortiumNorm: normalizeBusinessText(data.consortium),
     dueDateNorm: normalizeBusinessDueDate(data.dueDate),
     amountNorm: normalizeBusinessAmount(data.amount),
-    detailNorm: normalizeBusinessText(data.detail),
   };
 }
 
@@ -70,7 +66,6 @@ export function hasUsefulBusinessKey(parts: BusinessKeyParts): boolean {
   return (
     parts.boletaNumberNorm.length > 0 ||
     parts.providerTaxIdNorm.length > 0 ||
-    parts.consortiumNorm.length > 0 ||
     parts.dueDateNorm.length > 0 ||
     parts.amountNorm.length > 0
   );
@@ -84,7 +79,6 @@ export function buildBusinessKeyString(parts: BusinessKeyParts): string | null {
   return [
     parts.boletaNumberNorm,
     parts.providerTaxIdNorm,
-    parts.consortiumNorm,
     parts.dueDateNorm,
     parts.amountNorm,
   ].join("|");
