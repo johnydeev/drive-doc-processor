@@ -200,6 +200,16 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
   - Tabla con Empresa, Nro. Cliente, Descripción y botón Eliminar con confirmación inline
   - Formulario inline: dropdown de 8 proveedores, nro. de cliente (normalizado sin ceros), descripción opcional
   - Manejo de 409 (duplicado) con mensaje específico
+- **Mejora de `ALL_TAX_IDS_RULES`** (30/03/2026)
+  - Instrucción más precisa para extraer todos los CUITs con formato normalizado con guiones (`XX-XXXXXXXX-X`)
+  - Regla explícita: DNI con exactamente 11 dígitos se trata como CUIT del consorcio y se incluye en allTaxIds
+  - DNI con menos de 11 dígitos se ignora (DNI real de persona física)
+  - CAE (14 dígitos) y número de comprobante excluidos explícitamente
+  - Ingresos Brutos incluido como señal del CUIT del emisor
+- **Mejora de `buildInvoicePrompt`** (30/03/2026)
+  - Nueva descripción estructural del layout AFIP estándar (bloque emisor / comprobante / receptor)
+  - Orientación explícita para distinguir el CUIT del emisor del receptor
+  - `providerTaxId` puede ser null sin romper el matching (allTaxIds como fallback)
 
 ---
 

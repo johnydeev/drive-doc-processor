@@ -4,6 +4,24 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-03-30 — Mejora de extracción allTaxIds y providerTaxId en facturas normales
+
+### Problema
+Tres casos reales mostraron fallas en la extracción de CUITs: (1) BSS con dos labels C.U.I.T. en el mismo documento, (2) Ferretería Serrano con el consorcio bajo label `DNI: 30714787256` (11 dígitos = CUIT) que el prompt anterior excluía, (3) Ikarus Seguridad con el CUIT del emisor en imagen no copiable. En todos los casos allTaxIds no capturaba los CUITs suficientes para el CUIT-first matching del pipeline.
+
+### Decisión
+Mejorar ALL_TAX_IDS_RULES: incluir valores bajo label `DNI:` si tienen exactamente 11 dígitos (CUIT mal etiquetado), excluir si tienen menos (DNI real). Agregar Ingresos Brutos como señal del CUIT del emisor. Excluir explícitamente CAE (14 dígitos) y número de comprobante. Mejorar buildInvoicePrompt con descripción estructural del layout AFIP estándar para que la IA distinga bloque emisor de bloque receptor y sepa que providerTaxId puede ser null sin romper el matching.
+
+### Alternativas descartadas
+- Validar el dígito verificador del CUIT en el prompt: demasiado complejo para instrucción de IA, mejor hacerlo en el pipeline si fuera necesario.
+- Modificar el pipeline para intentar parsing de DNI: innecesario, la solución en el prompt es más limpia.
+
+### Impacto
+- Modificado: `src/lib/extraction.ts` (ALL_TAX_IDS_RULES + buildInvoicePrompt)
+- Sin cambios en pipeline, schema ni migraciones
+
+---
+
 ## 2026-03-30 — LspServices: delete + create en lugar de PUT/PATCH
 
 ### Problema

@@ -43,11 +43,11 @@ services:
       web:
         condition: service_healthy
 
-  # ── Cloudflare Tunnel ──────────────────────────────────────────
+# ── Cloudflare Tunnel ──────────────────────────────────────────
   tunnel:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2025.2.0
     restart: unless-stopped
-    command: tunnel run
+    command: tunnel --no-autoupdate run --url http://web:3000
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
