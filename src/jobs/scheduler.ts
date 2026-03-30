@@ -107,7 +107,7 @@ const runOnce = async (): Promise<void> => {
         }
 
         if (created > 0) {
-          schedulerLog.jobsQueued(created, client.id, client.name);
+          schedulerLog.jobsQueued(created, client.id, client.name, files.length, client.batchSize);
         }
 
         lastRunByClient.set(client.id, now);

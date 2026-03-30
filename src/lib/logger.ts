@@ -19,7 +19,9 @@ const LEVEL_PREFIX: Record<LogLevel, string> = {
 };
 
 function timestamp(): string {
-  return new Date().toISOString().replace("T", " ").slice(0, 19);
+  return new Date().toLocaleString("sv-SE", {
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).replace("T", " ");
 }
 
 function formatTag(process: ProcessTag, sub?: string): string {
@@ -87,8 +89,12 @@ export const schedulerLog = {
     log("debug", "scheduler", `Sin PDFs pendientes — "${clientName}" [${shortId(clientId)}]`);
   },
 
-  jobsQueued(count: number, clientId: string, clientName: string) {
-    log("success", "scheduler", `${count} job(s) encolado(s) — "${clientName}" [${shortId(clientId)}]`);
+  jobsQueued(count: number, clientId: string, clientName: string, totalFound: number, batchSize: number) {
+    const capped = totalFound >= batchSize;
+    const foundLabel = capped
+      ? `${totalFound} encontrado(s) (límite de lote: ${batchSize})`
+      : `${totalFound} encontrado(s)`;
+    log("success", "scheduler", `${count} job(s) encolado(s) — "${clientName}" [${shortId(clientId)}] — ${foundLabel}`);
   },
 
   batchLimitReached(clientId: string, clientName: string, created: number, total: number) {
