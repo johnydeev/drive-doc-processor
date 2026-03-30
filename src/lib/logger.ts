@@ -65,8 +65,7 @@ export const schedulerLog = {
   },
 
   cycleStart(clientCount: number) {
-    miniDivider("scheduler");
-    log("info", "scheduler", `Ciclo de escaneo iniciado — ${clientCount} cliente(s) activo(s)`);
+    divider("scheduler", `🔄 CICLO DE ESCANEO — ${clientCount} cliente(s) activo(s)`);
   },
 
   cycleEmpty() {
@@ -75,6 +74,7 @@ export const schedulerLog = {
 
   cycleEnd() {
     log("info", "scheduler", "Ciclo de escaneo finalizado");
+    console.log(`[${timestamp()}] [SCHEDULER] ${"═".repeat(50)}`);
   },
 
   clientPaused(clientId: string, clientName: string) {
@@ -128,8 +128,7 @@ export const workerLog = {
   },
 
   jobClaimed(jobId: string, fileId: string, fileName: string | null, clientName: string) {
-    miniDivider("worker");
-    log("info", "worker", `Job reclamado: ${shortId(jobId)}`);
+    divider("worker", `⚙️  Procesando job: ${shortId(jobId)}`);
     log("info", "worker", `  Archivo: "${fileName ?? fileId}"`);
     log("info", "worker", `  Cliente: "${clientName}"`);
   },
@@ -170,7 +169,7 @@ export const workerLog = {
 
 export const pipelineLog = {
   fileStart(clientId: string, fileId: string, fileName: string) {
-    log("info", "job", `📄 Procesando: "${fileName}"`, shortId(clientId));
+    divider("job", `📄 ${fileName}`);
     log("debug", "job", `  fileId: ${fileId}`, shortId(clientId));
   },
 
@@ -237,13 +236,6 @@ export const pipelineLog = {
     log("warn", "job", `  CUIT del OCR (${cuit}) coincide con consorcio — fallback a nombre`, shortId(clientId));
   },
 
-  consortiumMatchedByCuit(clientId: string, consortiumName: string, cuit: string) {
-    log("success", "job", `  Consorcio: match CUIT (${cuit}) → "${consortiumName}"`, shortId(clientId));
-  },
-
-  providerMatchedByCuit(clientId: string, providerName: string, cuit: string) {
-    log("success", "job", `  Proveedor: match CUIT (${cuit}) → "${providerName}"`, shortId(clientId));
-  },
 
   lspProviderResolvedFromDB(clientId: string, providerName: string, cuit: string) {
     log("success", "job", `  LSP Proveedor resuelto desde DB: "${providerName}" CUIT=${cuit}`, shortId(clientId));
@@ -283,10 +275,12 @@ export const pipelineLog = {
   fileCompleted(clientId: string, fileName: string, result: { processed: number; unassigned: number; duplicate: boolean }) {
     const status = result.unassigned > 0 ? "⚠️  SIN ASIGNAR" : result.duplicate ? "⚠️  DUPLICADO" : "✅ OK";
     log("info", "job", `  Resultado: ${status} — "${fileName}"`, shortId(clientId));
+    console.log(`[${timestamp()}] [JOB] ${"─".repeat(50)}`);
   },
 
   fileFailed(clientId: string, fileName: string, error: string) {
     log("error", "job", `  ❌ FALLÓ: "${fileName}" — ${error}`, shortId(clientId));
+    console.log(`[${timestamp()}] [JOB] ${"─".repeat(50)}`);
   },
 
   batchStart(clientId: string, clientName: string, pendingFolder: string, fileCount: number) {

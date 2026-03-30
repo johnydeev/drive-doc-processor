@@ -7,6 +7,8 @@ Highlights
 - **UI de gestión de LspServices por consorcio**: nueva sección "Servicios públicos (LSP)" con tabla de servicios existentes, formulario inline para agregar (dropdown de 8 proveedores, nro. cliente normalizado, descripción), y eliminación con confirmación inline. Endpoints `GET/POST /api/client/consortiums/[id]/lsp-services` y `DELETE .../[lspId]`.
 - **Mejora extracción allTaxIds**: DNI con 11 dígitos ahora se incluye en allTaxIds como CUIT mal etiquetado. Ingresos Brutos agregado como señal del CUIT del emisor. CAE y comprobante explícitamente excluidos. Formato normalizado con guiones.
 - **Mejora buildInvoicePrompt**: descripción estructural del layout AFIP para distinguir bloque emisor vs receptor. providerTaxId puede ser null sin romper el CUIT-first matching.
+- **Fix scheduler requeue**: el scheduler ahora ignora jobs COMPLETED/FAILED al decidir si encolar un archivo. Permite reprocesar archivos que volvieron a Pendientes desde Sin Asignar u otros flujos.
+- **Feature Reprocesar Sin Asignar**: botón "♻️ Sin Asignar" en sidebar del panel cliente. Lista archivos en carpeta Sin Asignar y los mueve a Pendientes con un click. El scheduler los procesa en el próximo ciclo automáticamente. Endpoints: `GET /api/client/unassigned/preview`, `POST /api/client/unassigned/requeue`.
 
 ## 2026-03-28
 

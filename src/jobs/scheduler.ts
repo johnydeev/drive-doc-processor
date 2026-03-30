@@ -82,7 +82,11 @@ const runOnce = async (): Promise<void> => {
           }
 
           const existingJob = await prisma.processingJob.findFirst({
-            where: { clientId: client.id, driveFileId: file.id },
+            where: {
+              clientId: client.id,
+              driveFileId: file.id,
+              status: { in: ["PENDING", "PROCESSING"] },
+            },
             select: { id: true },
           });
           if (existingJob) {

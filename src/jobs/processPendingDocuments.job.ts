@@ -300,7 +300,6 @@ async function resolveAssignment(
       if (found) {
         consortiumRow = found;
         matchMethod = `CUIT (${cuit})`;
-        pipelineLog.consortiumMatchedByCuit(clientId, found.canonicalName, cuit);
         break;
       }
     }
@@ -388,7 +387,6 @@ async function resolveAssignment(
       if (found) {
         matched = found;
         providerMatchMethod = `CUIT allTaxIds (${cuit})`;
-        pipelineLog.providerMatchedByCuit(clientId, found.canonicalName, cuit);
         break;
       }
     }

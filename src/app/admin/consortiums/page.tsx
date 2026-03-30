@@ -145,6 +145,14 @@ export default function ConsortiumsPage() {
   const [closeAllResult, setCloseAllResult] = useState<{ closed: number; skipped: number; warnings: string[] } | null>(null);
   const [closeAllError, setCloseAllError] = useState<string | null>(null);
 
+  // Unassigned requeue
+  const [showUnassignedModal, setShowUnassignedModal] = useState(false);
+  const [unassignedStep, setUnassignedStep] = useState<"preview" | "result">("preview");
+  const [unassignedFiles, setUnassignedFiles] = useState<{ id: string; name: string }[]>([]);
+  const [unassignedFolderConfigured, setUnassignedFolderConfigured] = useState(true);
+  const [unassignedResult, setUnassignedResult] = useState<{ moved: number; failed: number } | null>(null);
+  const [loadingUnassigned, setLoadingUnassigned] = useState(false);
+
   // Scheduler control
   const [schedulerEnabled, setSchedulerEnabled] = useState<boolean | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -265,6 +273,41 @@ export default function ConsortiumsPage() {
     } catch (err) {
       setCloseAllError(err instanceof Error ? err.message : "Error");
     } finally { setCloseAllLoading(false); }
+  };
+
+  const handleOpenUnassigned = async () => {
+    setShowUnassignedModal(true);
+    setUnassignedStep("preview");
+    setUnassignedResult(null);
+    setUnassignedFiles([]);
+    setUnassignedFolderConfigured(true);
+    setLoadingUnassigned(true);
+    try {
+      const res = await guardedFetch("/api/client/unassigned/preview", { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setUnassignedFolderConfigured(data.folderConfigured ?? false);
+      setUnassignedFiles(data.files ?? []);
+    } catch (err) {
+      setUnassignedFolderConfigured(false);
+      setUnassignedFiles([]);
+    } finally { setLoadingUnassigned(false); }
+  };
+
+  const handleRequeue = async () => {
+    setLoadingUnassigned(true);
+    try {
+      const res = await guardedFetch("/api/client/unassigned/requeue", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setUnassignedResult({ moved: data.moved ?? 0, failed: data.failed ?? 0 });
+      setUnassignedStep("result");
+    } catch (err) {
+      setUnassignedResult({ moved: 0, failed: unassignedFiles.length });
+      setUnassignedStep("result");
+    } finally { setLoadingUnassigned(false); }
   };
 
   const [consortiums, setConsortiums] = useState<Consortium[]>([]);
@@ -733,6 +776,12 @@ export default function ConsortiumsPage() {
             <button type="button" className={styles.navSidebarItem} onClick={() => { handleCloseAllPreview(); setNavMobileOpen(false); }} disabled={closeAllLoading || busyAction !== null}>
               <span className={styles.navSidebarItemIcon}>📅</span>
               {!navCollapsed && <span className={styles.navSidebarItemLabel}>{closeAllLoading ? "Cargando..." : "Cerrar Periodo General"}</span>}
+            </button>
+          )}
+          {isClient && (
+            <button type="button" className={styles.navSidebarItem} onClick={() => { handleOpenUnassigned(); setNavMobileOpen(false); }} disabled={loadingUnassigned || busyAction !== null}>
+              <span className={styles.navSidebarItemIcon}>♻️</span>
+              {!navCollapsed && <span className={styles.navSidebarItemLabel}>{loadingUnassigned ? "Consultando..." : "Sin Asignar"}</span>}
             </button>
           )}
           <button type="button" className={styles.navSidebarItem} onClick={() => { handleLogout(); setNavMobileOpen(false); }}>
@@ -1353,6 +1402,69 @@ export default function ConsortiumsPage() {
                 )}
                 <div className={styles.modalActions}>
                   <button type="button" className={styles.ghostBtn} onClick={() => setShowCloseAllModal(false)}>Cerrar</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Unassigned requeue modal ── */}
+      {showUnassignedModal && (
+        <div className={styles.modalOverlay} onClick={() => !loadingUnassigned && setShowUnassignedModal(false)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            {unassignedStep === "preview" && (
+              <>
+                <h3 className={styles.modalTitle}>Archivos Sin Asignar</h3>
+                {loadingUnassigned && <p className={styles.modalBody}>Consultando Drive...</p>}
+                {!loadingUnassigned && !unassignedFolderConfigured && (
+                  <>
+                    <p className={styles.modalBody}>La carpeta Sin Asignar no está configurada para este cliente.</p>
+                    <div className={styles.modalActions}>
+                      <button type="button" className={styles.ghostBtn} onClick={() => setShowUnassignedModal(false)}>Cerrar</button>
+                    </div>
+                  </>
+                )}
+                {!loadingUnassigned && unassignedFolderConfigured && unassignedFiles.length === 0 && (
+                  <>
+                    <p className={styles.modalBody}>No hay archivos sin asignar.</p>
+                    <div className={styles.modalActions}>
+                      <button type="button" className={styles.ghostBtn} onClick={() => setShowUnassignedModal(false)}>Cerrar</button>
+                    </div>
+                  </>
+                )}
+                {!loadingUnassigned && unassignedFolderConfigured && unassignedFiles.length > 0 && (
+                  <>
+                    <p className={styles.modalBody}>
+                      Se encontraron <strong>{unassignedFiles.length}</strong> archivo(s) en la carpeta Sin Asignar:
+                    </p>
+                    <ul className={styles.closeAllList}>
+                      {unassignedFiles.map((f) => (
+                        <li key={f.id}>{f.name}</li>
+                      ))}
+                    </ul>
+                    <div className={styles.modalActions}>
+                      <button type="button" className={styles.ghostBtn} onClick={() => setShowUnassignedModal(false)}>Cancelar</button>
+                      <button type="button" className={styles.closePeriodConfirmBtn} onClick={handleRequeue} disabled={loadingUnassigned}>
+                        Mover a Pendientes ({unassignedFiles.length} archivos)
+                      </button>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+            {unassignedStep === "result" && unassignedResult && (
+              <>
+                <h3 className={styles.modalTitle}>Archivos movidos a Pendientes</h3>
+                <p className={styles.modalBody}>
+                  {unassignedResult.moved > 0 && <>{unassignedResult.moved} archivo(s) movidos a Pendientes correctamente.<br /></>}
+                  {unassignedResult.failed > 0 && <span style={{ color: "#ffb872" }}>{unassignedResult.failed} archivo(s) no pudieron moverse.<br /></span>}
+                  <br />
+                  El scheduler los procesará en el próximo ciclo automáticamente.
+                  También podés usar <strong>Ejecutar ahora</strong> en la toolbar.
+                </p>
+                <div className={styles.modalActions}>
+                  <button type="button" className={styles.ghostBtn} onClick={() => setShowUnassignedModal(false)}>Cerrar</button>
                 </div>
               </>
             )}

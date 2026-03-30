@@ -210,6 +210,12 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
   - Nueva descripción estructural del layout AFIP estándar (bloque emisor / comprobante / receptor)
   - Orientación explícita para distinguir el CUIT del emisor del receptor
   - `providerTaxId` puede ser null sin romper el matching (allTaxIds como fallback)
+- **Feature "Reprocesar Sin Asignar"** (30/03/2026)
+  - Botón "♻️ Sin Asignar" en sidebar del panel cliente (solo rol CLIENT)
+  - Lista archivos en carpeta Sin Asignar de Drive via preview endpoint
+  - Los mueve a Pendientes con un click, el scheduler los procesa en el próximo ciclo
+  - Sin cambios en pipeline ni schema
+  - Endpoints: `GET /api/client/unassigned/preview`, `POST /api/client/unassigned/requeue`
 
 ---
 

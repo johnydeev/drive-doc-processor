@@ -4,6 +4,44 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-03-30 — Fix: scheduler no reprocesaba archivos con job COMPLETED/FAILED
+
+### Problema
+El scheduler chequeaba existingJob sin filtrar por status. Archivos que volvían a Pendientes (ej: via requeue desde Sin Asignar) eran salteados si tenían un ProcessingJob previo en cualquier estado, incluyendo COMPLETED y FAILED.
+
+### Decisión
+Agregar `status: { in: ["PENDING", "PROCESSING"] }` al findFirst de existingJob en scheduler.ts. Solo se saltea si hay un job activo en curso. Jobs terminados (COMPLETED/FAILED) no bloquean el reprocesamiento. El check de existingInvoice sigue siendo el guard principal contra duplicados reales.
+
+### Impacto
+- Modificado: `src/jobs/scheduler.ts`
+- Sin cambios en schema ni migraciones
+
+---
+
+## 2026-03-30 — Feature: Reprocesar Sin Asignar desde el panel (Opción C)
+
+### Problema
+Los archivos que van a Sin Asignar (proveedor no encontrado en DB) quedaban bloqueados hasta que el usuario los movía manualmente en Drive a Pendientes. No había forma de reencolarlos desde el panel.
+
+### Decisión
+- Endpoint GET /api/client/unassigned/preview: lista PDFs en carpeta Sin Asignar.
+- Endpoint POST /api/client/unassigned/requeue: mueve archivos de Sin Asignar a Pendientes usando moveFileToFolder de GoogleDriveService. Tolerancia a fallos por archivo.
+- El scheduler detecta los archivos en Pendientes en el próximo ciclo y los encola como ProcessingJob normalmente — reutiliza toda la infraestructura existente.
+- No hay race condition: el check existingJob del scheduler previene duplicados.
+- No hay timeout HTTP: el endpoint solo mueve archivos (operación liviana).
+- UI: botón en sidebar, modal de 2 pasos (preview con lista → resultado con conteo).
+
+### Alternativas descartadas
+- Opción A (mover + procesar sincrónicamente): timeout HTTP con muchos archivos.
+- Opción B (procesar directo desde Sin Asignar): requería cambios en el pipeline y tenía el mismo problema de timeout HTTP.
+
+### Impacto
+- Nuevos: `src/app/api/client/unassigned/preview/route.ts`, `src/app/api/client/unassigned/requeue/route.ts`
+- Modificado: `src/app/admin/consortiums/page.tsx` (botón sidebar + modal)
+- Sin cambios en schema, migraciones ni pipeline
+
+---
+
 ## 2026-03-30 — Mejora de extracción allTaxIds y providerTaxId en facturas normales
 
 ### Problema
