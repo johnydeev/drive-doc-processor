@@ -19,7 +19,7 @@ const TIPOS_GASTO = [
 type Period      = { id: string; year: number; month: number; status: "ACTIVE" | "CLOSED"; };
 type Coeficiente = { id: string; name: string; value: number; };
 type Rubro       = { id: string; name: string; };
-type Consortium  = { id: string; canonicalName: string; rawName: string; cuit: string | null; cutoffDay: number; periods: Period[]; _count: { invoices: number }; };
+type Consortium  = { id: string; canonicalName: string; rawName: string; cuit: string | null; cutoffDay: number; matchNames: string | null; periods: Period[]; _count: { invoices: number }; };
 type Provider    = { id: string; canonicalName: string; cuit: string | null; paymentAlias: string | null; };
 type Invoice     = {
   id: string; boletaNumber: string | null; provider: string | null; providerTaxId: string | null;
@@ -96,6 +96,21 @@ const EMPTY_INVOICE_FORM: InvoiceForm = {
   rubroId: "", newRubroName: "",
   tipoGasto: "ORDINARIO", tipoComprobante: "",
 };
+
+type LspService = {
+  id: string; provider: string; clientNumber: string; description: string | null;
+};
+
+const LSP_PROVIDERS = [
+  { value: "EDESUR",      label: "Edesur" },
+  { value: "AYSA",        label: "AySA" },
+  { value: "EDENOR",      label: "Edenor" },
+  { value: "METROGAS",    label: "Metrogas" },
+  { value: "NATURGY",     label: "Naturgy" },
+  { value: "CAMUZZI",     label: "Camuzzi" },
+  { value: "LITORAL_GAS", label: "Litoral Gas" },
+  { value: "PERSONAL",    label: "Personal" },
+] as const;
 
 type ThemeMode = "dark" | "light";
 
@@ -301,6 +316,20 @@ export default function ConsortiumsPage() {
   const [consortiumError, setConsortiumError] = useState<string | null>(null);
   const [consortiumSuccess, setConsortiumSuccess] = useState<string | null>(null);
 
+  // matchNames editing
+  const [editingMatchNames, setEditingMatchNames] = useState(false);
+  const [matchNamesValue, setMatchNamesValue] = useState("");
+  const [savingMatchNames, setSavingMatchNames] = useState(false);
+  const [matchNamesMsg, setMatchNamesMsg] = useState<string | null>(null);
+
+  // LspServices
+  const [lspServices, setLspServices] = useState<LspService[]>([]);
+  const [lspForm, setLspForm] = useState({ provider: "", clientNumber: "", description: "" });
+  const [savingLsp, setSavingLsp] = useState(false);
+  const [lspError, setLspError] = useState<string | null>(null);
+  const [deletingLspId, setDeletingLspId] = useState<string | null>(null);
+  const [confirmDeleteLspId, setConfirmDeleteLspId] = useState<string | null>(null);
+
   const fetchConsortiums = useCallback(async () => {
     setLoadingList(true); setListError(null);
     try {
@@ -368,14 +397,82 @@ export default function ConsortiumsPage() {
     } catch { /* silent */ }
   }, [guardedFetch]);
 
+  const fetchLspServices = useCallback(async (consortiumId: string) => {
+    try {
+      const res = await guardedFetch(`/api/client/consortiums/${consortiumId}/lsp-services`);
+      const data = await res.json();
+      if (data.ok) setLspServices(data.lspServices ?? []);
+    } catch { /* silent */ }
+  }, [guardedFetch]);
+
+  const handleSaveMatchNames = async () => {
+    if (!selectedId) return;
+    setSavingMatchNames(true); setMatchNamesMsg(null);
+    try {
+      const res = await guardedFetch(`/api/client/consortiums/${selectedId}`, {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ matchNames: matchNamesValue.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setSelectedConsortium((prev) => prev ? { ...prev, matchNames: data.consortium.matchNames } : prev);
+      setEditingMatchNames(false);
+      setMatchNamesMsg("Guardado correctamente");
+      setTimeout(() => setMatchNamesMsg(null), 3000);
+    } catch (err) {
+      setMatchNamesMsg(err instanceof Error ? err.message : "Error al guardar");
+    } finally { setSavingMatchNames(false); }
+  };
+
+  const handleAddLsp = async () => {
+    if (!selectedId) return;
+    if (!lspForm.provider) { setLspError("Seleccioná una empresa"); return; }
+    if (!lspForm.clientNumber.trim()) { setLspError("El número de cliente es obligatorio"); return; }
+    setSavingLsp(true); setLspError(null);
+    try {
+      const res = await guardedFetch(`/api/client/consortiums/${selectedId}/lsp-services`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: lspForm.provider,
+          clientNumber: lspForm.clientNumber.trim(),
+          description: lspForm.description.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setLspServices((prev) => [data.lspService, ...prev]);
+      setLspForm({ provider: "", clientNumber: "", description: "" });
+    } catch (err) {
+      setLspError(err instanceof Error ? err.message : "Error al agregar servicio");
+    } finally { setSavingLsp(false); }
+  };
+
+  const handleDeleteLsp = async (lspId: string) => {
+    if (!selectedId) return;
+    setDeletingLspId(lspId);
+    try {
+      const res = await guardedFetch(`/api/client/consortiums/${selectedId}/lsp-services/${lspId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setLspServices((prev) => prev.filter((s) => s.id !== lspId));
+    } catch (err) {
+      setLspError(err instanceof Error ? err.message : "Error al eliminar servicio");
+    } finally { setDeletingLspId(null); setConfirmDeleteLspId(null); }
+  };
+
   const handleSelectConsortium = useCallback(async (c: Consortium) => {
     setSelectedId(c.id); setSelectedConsortium(c);
     setInvoices([]); setSearch(""); setCloseSuccess(null); setCloseError(null);
+    setEditingMatchNames(false); setMatchNamesMsg(null);
+    setMatchNamesValue(c.matchNames ?? "");
+    setLspServices([]); setLspError(null); setLspForm({ provider: "", clientNumber: "", description: "" });
+    setConfirmDeleteLspId(null);
     void fetchCoeficientes(c.id);
     void fetchRubros(c.id);
+    void fetchLspServices(c.id);
     const periodId = await fetchPeriodsAndInvoices(c.id);
     if (periodId) void fetchInvoices(c.id, periodId);
-  }, [fetchPeriodsAndInvoices, fetchInvoices, fetchCoeficientes, fetchRubros]);
+  }, [fetchPeriodsAndInvoices, fetchInvoices, fetchCoeficientes, fetchRubros, fetchLspServices]);
 
   const handleSelectPeriod = useCallback((p: Period) => {
     setSelectedPeriod(p);
@@ -749,6 +846,95 @@ export default function ConsortiumsPage() {
                     + Cargar boleta
                   </button>
                 </div>
+              </div>
+
+              {/* ── matchNames editing ── */}
+              <div className={styles.matchNamesSection}>
+                <div className={styles.matchNamesHeader}>
+                  <span className={styles.matchNamesLabel}>Nombres alternativos (matching interno)</span>
+                  {!editingMatchNames && (
+                    <button type="button" className={styles.matchNamesEditBtn} onClick={() => {
+                      setMatchNamesValue(selectedConsortium.matchNames ?? "");
+                      setEditingMatchNames(true);
+                      setMatchNamesMsg(null);
+                    }}>Editar</button>
+                  )}
+                </div>
+                {editingMatchNames ? (
+                  <div className={styles.matchNamesEdit}>
+                    <input
+                      className={styles.formInput}
+                      value={matchNamesValue}
+                      onChange={(e) => setMatchNamesValue(e.target.value)}
+                      placeholder="NOMBRE ALT 1|NOMBRE ALT 2|NOMBRE ALT 3"
+                    />
+                    <p className={styles.matchNamesHelp}>Separar con | (pipe). Estos nombres se usan internamente para identificar el consorcio en facturas.</p>
+                    <div className={styles.matchNamesActions}>
+                      <button type="button" className={styles.ghostBtn} onClick={() => setEditingMatchNames(false)} disabled={savingMatchNames}>Cancelar</button>
+                      <button type="button" className={styles.addInvoiceBtn} onClick={handleSaveMatchNames} disabled={savingMatchNames}>
+                        {savingMatchNames ? "Guardando..." : "Guardar"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className={styles.matchNamesValue}>
+                    {selectedConsortium.matchNames || <span style={{ opacity: 0.4 }}>Sin nombres alternativos</span>}
+                  </p>
+                )}
+                {matchNamesMsg && <p className={styles.infoMsg} style={{ marginTop: 6 }}>{matchNamesMsg}</p>}
+              </div>
+
+              {/* ── LspServices section ── */}
+              <div className={styles.lspSection}>
+                <h3 className={styles.lspTitle}>Servicios públicos (LSP)</h3>
+                {lspServices.length > 0 && (
+                  <div className={styles.lspTableWrap}>
+                    <table className={styles.lspTable}>
+                      <thead>
+                        <tr>
+                          <th>Empresa</th><th>Nro. Cliente</th><th>Descripción</th><th>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lspServices.map((s) => (
+                          <tr key={s.id}>
+                            <td>{LSP_PROVIDERS.find((p) => p.value === s.provider)?.label ?? s.provider}</td>
+                            <td className={styles.tdMono}>{s.clientNumber}</td>
+                            <td>{s.description ?? "—"}</td>
+                            <td>
+                              {confirmDeleteLspId === s.id ? (
+                                <span className={styles.lspConfirmDelete}>
+                                  ¿Confirmar?{" "}
+                                  <button type="button" className={styles.lspConfirmYes} onClick={() => handleDeleteLsp(s.id)} disabled={deletingLspId === s.id}>
+                                    {deletingLspId === s.id ? "..." : "Sí"}
+                                  </button>
+                                  <button type="button" className={styles.lspConfirmNo} onClick={() => setConfirmDeleteLspId(null)}>No</button>
+                                </span>
+                              ) : (
+                                <button type="button" className={styles.lspDeleteBtn} onClick={() => setConfirmDeleteLspId(s.id)}>Eliminar</button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {lspServices.length === 0 && (
+                  <p className={styles.lspEmpty}>No hay servicios públicos cargados para este consorcio.</p>
+                )}
+                <div className={styles.lspAddForm}>
+                  <select className={styles.formSelect} value={lspForm.provider} onChange={(e) => setLspForm((f) => ({ ...f, provider: e.target.value }))}>
+                    <option value="">Empresa...</option>
+                    {LSP_PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                  </select>
+                  <input className={styles.formInput} value={lspForm.clientNumber} onChange={(e) => setLspForm((f) => ({ ...f, clientNumber: e.target.value }))} placeholder="Nro. de cliente" />
+                  <input className={styles.formInput} value={lspForm.description} onChange={(e) => setLspForm((f) => ({ ...f, description: e.target.value }))} placeholder="Descripción (opcional)" />
+                  <button type="button" className={styles.addInvoiceBtn} onClick={handleAddLsp} disabled={savingLsp}>
+                    {savingLsp ? "Agregando..." : "Agregar"}
+                  </button>
+                </div>
+                {lspError && <p className={styles.errorMsg}>{lspError}</p>}
               </div>
 
               <div className={styles.periodNav}>

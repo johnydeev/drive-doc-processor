@@ -1,6 +1,6 @@
 # Progreso del proyecto — drive-doc-processor
 
-Actualizado al 27/03/2026 (sesión 20).
+Actualizado al 30/03/2026 (sesión 21).
 
 ---
 
@@ -190,6 +190,16 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
   - UI: campo "Intervalo del scheduler" en la página de edición de cliente admin (1-1440 min)
   - API: endpoint PATCH `/api/admin/clients/[id]` acepta `intervalMinutes` (int, 1-1440)
   - Migración: `20260327000200_add_interval_minutes`
+- **UI de edición de matchNames de consorcio** (30/03/2026)
+  - Nuevo campo editable en la vista de detalle de consorcio para `matchNames`
+  - Nuevo endpoint `PATCH /api/client/consortiums/[id]` con `requireClientSession`
+  - Muestra valor actual con botón "Editar", campo de texto con ayuda, botón guardar/cancelar
+- **UI de gestión de LspServices desde el panel** (30/03/2026)
+  - Sección "Servicios públicos (LSP)" en detalle de consorcio con tabla y formulario inline
+  - Endpoints: `GET/POST /api/client/consortiums/[id]/lsp-services`, `DELETE .../[lspId]`
+  - Tabla con Empresa, Nro. Cliente, Descripción y botón Eliminar con confirmación inline
+  - Formulario inline: dropdown de 8 proveedores, nro. de cliente (normalizado sin ceros), descripción opcional
+  - Manejo de 409 (duplicado) con mensaje específico
 
 ---
 

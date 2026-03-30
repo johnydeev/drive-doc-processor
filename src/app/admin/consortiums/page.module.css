@@ -863,6 +863,142 @@
   margin-left: 6px;
 }
 
+/* ── matchNames section ── */
+.matchNamesSection {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.matchNamesHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.matchNamesLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #7a8fb5;
+}
+.matchNamesEditBtn {
+  background: none;
+  border: 1px solid rgba(91,140,247,0.3);
+  color: #5b8cf7;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.matchNamesEditBtn:hover { background: rgba(91,140,247,0.1); }
+.matchNamesValue {
+  font-size: 13px;
+  color: #c0cde5;
+  word-break: break-all;
+}
+.matchNamesEdit { display: flex; flex-direction: column; gap: 8px; }
+.matchNamesHelp {
+  font-size: 11px;
+  color: #5a6e8e;
+  line-height: 1.4;
+}
+.matchNamesActions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ── LspServices section ── */
+.lspSection {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.lspTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #c0cde5;
+  margin-bottom: 10px;
+}
+.lspEmpty {
+  font-size: 12px;
+  color: #5a6e8e;
+  margin-bottom: 10px;
+}
+.lspTableWrap {
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+.lspTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.lspTable th {
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #5a6e8e;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.lspTable td {
+  padding: 7px 10px;
+  color: #c0cde5;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.lspDeleteBtn {
+  background: none;
+  border: 1px solid rgba(255,100,100,0.3);
+  color: #ff8888;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.lspDeleteBtn:hover { background: rgba(255,100,100,0.1); }
+.lspConfirmDelete {
+  font-size: 11px;
+  color: #ffb872;
+}
+.lspConfirmYes {
+  background: none;
+  border: none;
+  color: #ff6666;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 11px;
+  padding: 0 4px;
+}
+.lspConfirmNo {
+  background: none;
+  border: none;
+  color: #7a8fb5;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 4px;
+}
+.lspAddForm {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.lspAddForm .formSelect,
+.lspAddForm .formInput {
+  flex: 1;
+  min-width: 120px;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+.lspAddForm .addInvoiceBtn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* ── Responsive ── */
 @media (max-width: 1024px) {
   .navSidebar {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-30
+
+Highlights
+- **UI de edición de matchNames por consorcio**: nuevo campo editable en la vista de detalle para configurar nombres alternativos de matching interno. Endpoint `PATCH /api/client/consortiums/[id]` con soporte para `matchNames`.
+- **UI de gestión de LspServices por consorcio**: nueva sección "Servicios públicos (LSP)" con tabla de servicios existentes, formulario inline para agregar (dropdown de 8 proveedores, nro. cliente normalizado, descripción), y eliminación con confirmación inline. Endpoints `GET/POST /api/client/consortiums/[id]/lsp-services` y `DELETE .../[lspId]`.
+
 ## 2026-03-28
 
 Highlights

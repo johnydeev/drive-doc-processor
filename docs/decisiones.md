@@ -4,6 +4,40 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-03-30 — LspServices: delete + create en lugar de PUT/PATCH
+
+### Problema
+Se necesitaba un CRUD de LspServices por consorcio en la UI. ¿Implementar edición (PUT/PATCH) o solo crear y eliminar?
+
+### Decisión
+No se implementa endpoint de edición (PUT/PATCH). Con delete + create es suficiente dado que LspService tiene solo 3 campos editables (provider, clientNumber, description) y el unique constraint es sobre `(consortiumId, provider, clientNumber)`, que son los campos clave. Editar implica cambiar la identidad del registro. Es más simple y menos propenso a errores eliminar y recrear.
+
+### Alternativas descartadas
+- **PUT/PATCH endpoint**: agrega complejidad innecesaria. Si se cambia provider o clientNumber hay que validar el nuevo unique constraint y manejar el caso de que el nuevo combo ya exista, que es lo mismo que crear uno nuevo.
+
+### Impacto
+- Menos código de backend (un endpoint menos)
+- UI más simple (no requiere modal de edición, solo tabla + formulario inline + botón eliminar)
+
+---
+
+## 2026-03-30 — matchNames y LspServices integrados en vista de detalle de consorcio
+
+### Problema
+¿Dónde ubicar la edición de matchNames y la gestión de LspServices en la UI?
+
+### Decisión
+Ambas features se integran directamente en la vista de detalle del consorcio seleccionado (`page.tsx`), entre el header y la navegación de períodos. No se crean modales ni páginas separadas. matchNames usa un campo inline con toggle editar/ver. LspServices usa una tabla + formulario inline dentro de una sección colapsada visualmente.
+
+### Alternativas descartadas
+- **Modal separado para cada feature**: agrega más estado y complejidad modal (ya hay 5+ modales en la página).
+- **Página dedicada `/admin/consortiums/[id]/settings`**: overengineering para 2 campos simples.
+
+### Impacto
+- Archivos modificados: `page.tsx`, `page.module.css`, `consortiums/[id]/route.ts` (PATCH), nuevos `lsp-services/route.ts` y `lsp-services/[lspId]/route.ts`
+
+---
+
 ## 2026-03-27 — Intervalo del scheduler configurable por cliente
 
 ### Problema
