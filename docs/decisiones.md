@@ -4,6 +4,29 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-03-30 — Mejora fallback OCR para PDFs con bloques en imagen
+
+### Problema
+PDFs como Ikarus Seguridad tienen el bloque del emisor (nombre, CUIT) renderizado
+como imagen dentro del PDF. pdf-parse extrae el texto del cuerpo pero omite la
+imagen. El resultado no está vacío, por lo que el fallback a Tesseract no se
+activaba. La IA recibía texto sin CUIT del emisor y extraía proveedor=null.
+
+### Decisión
+Cambiar el umbral de activación del OCR en PdfTextExtractorService:
+- Antes: activar solo si directText.length === 0
+- Ahora: activar si directText < 100 chars O si no contiene secuencia de 10+
+  dígitos consecutivos (indicador de ausencia de CUIT/CAE en el texto)
+Cuando OCR produce más texto que pdf-parse, combinar ambos con separador
+`--- OCR ---` para que la IA tenga toda la información disponible.
+
+### Impacto
+- Modificado: `src/services/pdfTextExtractor.service.ts`
+- Sin cambios en pipeline, schema ni prompts
+- Mejora automática para cualquier PDF con bloques en imagen, no solo Ikarus
+
+---
+
 ## 2026-03-30 — Fix: scheduler no reprocesaba archivos con job COMPLETED/FAILED
 
 ### Problema

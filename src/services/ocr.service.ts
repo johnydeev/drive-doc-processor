@@ -9,7 +9,8 @@ const DEFAULT_SCALE = 2.0;
 const DEFAULT_LANGUAGE = "spa+eng";
 
 interface PdfJsModule {
-  getDocument: (input: { data: Buffer }) => {
+  GlobalWorkerOptions: { workerSrc: string };
+  getDocument: (input: { data: Uint8Array }) => {
     promise: Promise<{
       numPages: number;
       getPage: (pageNumber: number) => Promise<any>;
@@ -34,7 +35,11 @@ export class OcrService {
       import("pdfjs-dist/legacy/build/pdf.mjs") as Promise<PdfJsModule>,
     ]);
 
-    const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+    // Configurar worker de pdfjs con la misma versión para evitar mismatch
+    const pdfjsWorkerPath = require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
+    pdfjs.GlobalWorkerOptions.workerSrc = `file://${pdfjsWorkerPath}`;
+
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
     const worker = await createWorker(language);
 
     try {

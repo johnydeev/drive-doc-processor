@@ -8,6 +8,7 @@ Highlights
 - **Mejora extracción allTaxIds**: DNI con 11 dígitos ahora se incluye en allTaxIds como CUIT mal etiquetado. Ingresos Brutos agregado como señal del CUIT del emisor. CAE y comprobante explícitamente excluidos. Formato normalizado con guiones.
 - **Mejora buildInvoicePrompt**: descripción estructural del layout AFIP para distinguir bloque emisor vs receptor. providerTaxId puede ser null sin romper el CUIT-first matching.
 - **Fix scheduler requeue**: el scheduler ahora ignora jobs COMPLETED/FAILED al decidir si encolar un archivo. Permite reprocesar archivos que volvieron a Pendientes desde Sin Asignar u otros flujos.
+- **Mejora OCR fallback**: el extractor de texto ahora activa Tesseract OCR cuando pdf-parse produce texto sin CUITs detectables, no solo cuando está vacío. Los textos de pdf-parse y OCR se combinan para maximizar la información disponible para la IA.
 - **Feature Reprocesar Sin Asignar**: botón "♻️ Sin Asignar" en sidebar del panel cliente. Lista archivos en carpeta Sin Asignar y los mueve a Pendientes con un click. El scheduler los procesa en el próximo ciclo automáticamente. Endpoints: `GET /api/client/unassigned/preview`, `POST /api/client/unassigned/requeue`.
 
 ## 2026-03-28
