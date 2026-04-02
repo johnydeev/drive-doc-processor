@@ -312,6 +312,7 @@ model Provider {
   receipts            Receipt[]
   lspServices         LspService[]
 
+  @@unique([clientId, canonicalName])
   @@index([clientId, cuit])
   @@index([clientId])
 }

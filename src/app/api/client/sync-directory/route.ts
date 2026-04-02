@@ -11,6 +11,9 @@ export async function POST(request: NextRequest) {
   const clientId = auth.session.clientId;
 
   try {
+    const startTime = Date.now();
+    console.log(`[sync-directory] Iniciando sincronización — clientId=${clientId}`);
+
     const prisma = getPrismaClient();
 
     const client = await prisma.client.findUnique({ where: { id: clientId } });
@@ -46,6 +49,7 @@ export async function POST(request: NextRequest) {
     const altaService = new GoogleSheetsService({ ...googleConfig, sheetsId: altaSheetsId });
 
     const directory = await altaService.readDirectory();
+    console.log(`[sync-directory] Directorio leído — consorcios=${directory.consortiums.length} proveedores=${directory.providers.length} rubros=${directory.rubros.length} coeficientes=${directory.coeficientes.length} lspServices=${directory.lspServices.length}`);
 
     const warnings: string[] = [...directory.warnings];
 
@@ -173,19 +177,11 @@ export async function POST(request: NextRequest) {
     // Transacción 4: Proveedores
     await prisma.$transaction(async (tx) => {
       for (const p of directory.providers) {
-        const existing = await tx.provider.findFirst({
-          where: { clientId, canonicalName: p.canonicalName },
+        await tx.provider.upsert({
+          where: { clientId_canonicalName: { clientId, canonicalName: p.canonicalName } },
+          update: { cuit: p.cuit, matchNames: p.matchNames, paymentAlias: p.paymentAlias },
+          create: { clientId, canonicalName: p.canonicalName, cuit: p.cuit, matchNames: p.matchNames, paymentAlias: p.paymentAlias },
         });
-        if (existing) {
-          await tx.provider.update({
-            where: { id: existing.id },
-            data: { cuit: p.cuit, matchNames: p.matchNames, paymentAlias: p.paymentAlias },
-          });
-        } else {
-          await tx.provider.create({
-            data: { clientId, canonicalName: p.canonicalName, cuit: p.cuit, matchNames: p.matchNames, paymentAlias: p.paymentAlias },
-          });
-        }
       }
 
       const sheetsProviderNames = new Set(directory.providers.map((p) => p.canonicalName));

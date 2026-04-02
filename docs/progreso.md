@@ -1,6 +1,6 @@
 # Progreso del proyecto — drive-doc-processor
 
-Actualizado al 30/03/2026 (sesión 21).
+Actualizado al 02/04/2026 (sesión 22).
 
 ---
 
@@ -210,6 +210,17 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
   - Nueva descripción estructural del layout AFIP estándar (bloque emisor / comprobante / receptor)
   - Orientación explícita para distinguir el CUIT del emisor del receptor
   - `providerTaxId` puede ser null sin romper el matching (allTaxIds como fallback)
+- **OCR resiliente con try/catch** (02/04/2026)
+  - `pdfTextExtractor.service.ts`: llamada a OCR envuelta en try/catch. Si OCR falla, el pipeline continúa con el texto de pdf-parse en vez de explotar
+- **OCR migrado de pdfjs-dist a pdftoppm** (02/04/2026)
+  - `ocr.service.ts` reescrito: usa `pdftoppm` (poppler-utils) para convertir PDF a PNG y luego Tesseract para OCR
+  - Eliminados imports de `pdfjs-dist` y `@napi-rs/canvas`
+  - `poppler-utils` agregado al Dockerfile (stage runner)
+- **Sync-directory: upsert de Proveedores optimizado** (02/04/2026)
+  - Reemplazado `findFirst` + `update`/`create` por `upsert` directo con compound key `clientId_canonicalName`
+  - Reduce de 2 queries a 1 por proveedor (menos overhead en la transacción)
+  - Nuevo constraint `@@unique([clientId, canonicalName])` en Provider
+  - Migración: `20260402000100_provider_unique_client_canonical`
 - **Feature "Reprocesar Sin Asignar"** (30/03/2026)
   - Botón "♻️ Sin Asignar" en sidebar del panel cliente (solo rol CLIENT)
   - Lista archivos en carpeta Sin Asignar de Drive via preview endpoint

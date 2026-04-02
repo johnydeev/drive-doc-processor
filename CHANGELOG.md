@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-04-02
+
+Highlights
+- **OCR resiliente**: llamada a OCR envuelta en try/catch en `pdfTextExtractor.service.ts`. Si falla, el pipeline continúa con el texto de pdf-parse sin explotar.
+- **OCR migrado a pdftoppm**: `ocr.service.ts` reescrito — usa `pdftoppm` (poppler-utils) en lugar de `pdfjs-dist` + `@napi-rs/canvas`. Más liviano y estable en Docker. `poppler-utils` agregado al Dockerfile.
+- **Upsert de Proveedores optimizado en sync-directory**: reemplazado `findFirst` + `update`/`create` por `upsert` directo con compound key `clientId_canonicalName`. Reduce overhead de 2 queries a 1 por proveedor. Nuevo constraint `@@unique([clientId, canonicalName])` en Provider. Migración: `20260402000100_provider_unique_client_canonical`.
+
 ## 2026-03-30
 
 Highlights

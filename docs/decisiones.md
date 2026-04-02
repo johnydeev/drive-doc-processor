@@ -4,6 +4,41 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-02 — OCR migrado de pdfjs-dist a pdftoppm
+
+### Problema
+El servicio OCR usaba `pdfjs-dist` + `@napi-rs/canvas` para renderizar páginas de PDF a imagen y luego pasarlas a Tesseract. Esto requería dependencias nativas pesadas (`@napi-rs/canvas`) y era frágil en el container Docker.
+
+### Decisión
+Reescribir `ocr.service.ts` para usar `pdftoppm` (del paquete `poppler-utils`) en lugar de `pdfjs-dist`. pdftoppm convierte el PDF a imágenes PNG en disco (200 DPI), y luego Tesseract las procesa. Se eliminaron los imports de `pdfjs-dist` y `@napi-rs/canvas`.
+
+Además, la llamada al OCR desde `pdfTextExtractor.service.ts` se envolvió en try/catch para que si OCR falla, el pipeline continúe con el texto de pdf-parse.
+
+### Impacto
+- Reescrito: `src/services/ocr.service.ts`
+- Modificado: `src/services/pdfTextExtractor.service.ts` (try/catch)
+- Modificado: `Dockerfile` (agregado `poppler-utils`)
+
+---
+
+## 2026-04-02 — Upsert de Proveedores en sync-directory con constraint único
+
+### Problema
+El loop de upsert de proveedores en sync-directory usaba `findFirst` + `update`/`create` — 2 queries por proveedor, lo que generaba overhead innecesario en la transacción.
+
+### Decisión
+Agregar `@@unique([clientId, canonicalName])` a Provider y usar `upsert` directo de Prisma con el compound key. Reduce a 1 query por proveedor.
+
+### Alternativas descartadas
+Mantener `findFirst` + `update`/`create` para evitar migración. Se descartó porque el `upsert` es más performante y el constraint único es correcto semánticamente (no debería haber 2 proveedores con el mismo nombre canónico por cliente).
+
+### Impacto
+- Modificado: `prisma/schema.prisma` (nuevo `@@unique`)
+- Modificado: `src/app/api/client/sync-directory/route.ts` (upsert)
+- Migración: `20260402000100_provider_unique_client_canonical`
+
+---
+
 ## 2026-03-30 — Mejora fallback OCR para PDFs con bloques en imagen
 
 ### Problema
