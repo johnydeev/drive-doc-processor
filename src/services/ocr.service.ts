@@ -1,73 +1,77 @@
-﻿import { createWorker } from "tesseract.js";
+import { createWorker } from "tesseract.js";
+import { execSync } from "child_process";
+import { writeFileSync, readFileSync, readdirSync, unlinkSync, rmdirSync, mkdtempSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 export interface OcrOptions {
   scale?: number;
   language?: string;
 }
 
-const DEFAULT_SCALE = 2.0;
 const DEFAULT_LANGUAGE = "spa+eng";
-
-interface PdfJsModule {
-  GlobalWorkerOptions: { workerSrc: string };
-  getDocument: (input: { data: Uint8Array }) => {
-    promise: Promise<{
-      numPages: number;
-      getPage: (pageNumber: number) => Promise<any>;
-    }>;
-  };
-}
-
-interface CanvasModule {
-  createCanvas: (width: number, height: number) => {
-    getContext: (kind: "2d") => unknown;
-    toBuffer: (mimeType: "image/png") => Buffer;
-  };
-}
 
 export class OcrService {
   async extractTextFromPdf(buffer: Buffer, options?: OcrOptions): Promise<string> {
-    const scale = options?.scale ?? DEFAULT_SCALE;
     const language = options?.language ?? DEFAULT_LANGUAGE;
 
-    const [{ createCanvas }, pdfjs] = await Promise.all([
-      import("@napi-rs/canvas") as Promise<CanvasModule>,
-      import("pdfjs-dist/legacy/build/pdf.mjs") as Promise<PdfJsModule>,
-    ]);
-
-    // Configurar worker de pdfjs con la misma versión para evitar mismatch
-    const pdfjsWorkerPath = require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
-    pdfjs.GlobalWorkerOptions.workerSrc = `file://${pdfjsWorkerPath}`;
-
-    const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
-    const worker = await createWorker(language);
+    // Crear directorio temporal único
+    const tmpDir = mkdtempSync(join(tmpdir(), "ocr-"));
+    const pdfPath = join(tmpDir, "input.pdf");
+    const outputPrefix = join(tmpDir, "page");
 
     try {
-      let fullText = "";
+      // Escribir PDF a disco
+      writeFileSync(pdfPath, buffer);
 
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-        const page = await pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale });
-        const canvas = createCanvas(viewport.width, viewport.height);
-        const context = canvas.getContext("2d");
+      // Convertir PDF a imágenes PNG usando pdftoppm (200 DPI)
+      execSync(`pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`, {
+        timeout: 30000,
+      });
 
-        await page.render({
-          canvas: canvas as unknown as HTMLCanvasElement,
-          canvasContext: context as unknown as CanvasRenderingContext2D,
-          viewport,
-        }).promise;
+      // Leer archivos PNG generados (ordenados)
+      const files = readdirSync(tmpDir)
+        .filter(f => f.startsWith("page") && f.endsWith(".png"))
+        .sort();
 
-        const imageBuffer = canvas.toBuffer("image/png");
-        const { data } = await worker.recognize(imageBuffer);
-
-        if (data?.text) {
-          fullText += `${data.text}\n`;
-        }
+      if (files.length === 0) {
+        console.warn("[ocr-service] pdftoppm no generó imágenes");
+        return "";
       }
 
+      console.log(`[ocr-service] pdftoppm generó ${files.length} página(s)`);
+
+      // Procesar cada página con Tesseract
+      const worker = await createWorker(language);
+      let fullText = "";
+
+      try {
+        for (const file of files) {
+          const imagePath = join(tmpDir, file);
+          const imageBuffer = readFileSync(imagePath);
+          const { data } = await worker.recognize(imageBuffer);
+          if (data?.text) {
+            fullText += `${data.text}\n`;
+          }
+        }
+      } finally {
+        await worker.terminate();
+      }
+
+      console.log(`[ocr-service] OCR completado — ${fullText.length} chars extraídos`);
       return fullText;
+
     } finally {
-      await worker.terminate();
+      // Limpiar archivos temporales
+      try {
+        const files = readdirSync(tmpDir);
+        for (const file of files) {
+          unlinkSync(join(tmpDir, file));
+        }
+        rmdirSync(tmpDir);
+      } catch {
+        // Silent cleanup
+      }
     }
   }
 }

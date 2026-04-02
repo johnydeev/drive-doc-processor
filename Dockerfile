@@ -41,6 +41,7 @@ RUN apt-get update && \
       tesseract-ocr \
       tesseract-ocr-spa \
       tesseract-ocr-eng \
+      poppler-utils \
       ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     addgroup --system --gid 1001 nodejs && \

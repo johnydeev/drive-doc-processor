@@ -32,18 +32,25 @@ export class PdfTextExtractorService {
       `[pdf-extractor] Bloque emisor no detectado en texto ` +
       `(${directText.length} chars, hasEmitterBlock=${hasEmitterBlock}) → activando OCR`
     );
-    const { OcrService } = await import("@/services/ocr.service");
-    const ocrService = new OcrService();
-    const ocrText = await ocrService.extractTextFromPdf(buffer);
-    const cleanOcr = this.cleanText(ocrText);
+    try {
+      const { OcrService } = await import("@/services/ocr.service");
+      const ocrService = new OcrService();
+      const ocrText = await ocrService.extractTextFromPdf(buffer);
+      const cleanOcr = this.cleanText(ocrText);
 
-    // Si OCR produjo más texto útil, combinarlo con el texto directo
-    // para no perder lo que pdf-parse sí capturó correctamente
-    if (cleanOcr.length > directText.length) {
-      return this.mergeTexts(directText, cleanOcr);
+      if (cleanOcr.length > directText.length) {
+        console.warn(`[pdf-extractor] OCR exitoso — texto enriquecido (${cleanOcr.length} chars)`);
+        return this.mergeTexts(directText, cleanOcr);
+      }
+
+      return directText.length > 0 ? directText : cleanOcr;
+    } catch (ocrError) {
+      console.error(
+        `[pdf-extractor] OCR falló, usando texto de pdf-parse: ` +
+        `${ocrError instanceof Error ? ocrError.message : "Unknown error"}`
+      );
+      return directText;
     }
-
-    return directText.length > 0 ? directText : cleanOcr;
   }
 
   private mergeTexts(directText: string, ocrText: string): string {
