@@ -293,10 +293,17 @@ async function resolveAssignment(
   let consortiumRow: typeof allConsortiums[0] | undefined;
   let matchMethod = "";
 
-  // Intento 0: match por CUIT (allTaxIds)
+  // Intento 0: match por CUIT (allTaxIds) — incluye CUITs alternativos en matchNames
   if (allTaxIds.length > 0) {
     for (const cuit of allTaxIds) {
-      const found = allConsortiums.find((c) => c.cuit && normCuit(c.cuit) === cuit);
+      const found = allConsortiums.find((c) => {
+        if (c.cuit && normCuit(c.cuit) === cuit) return true;
+        const altNames = (c.matchNames ?? "").split("|").map(n => n.trim()).filter(Boolean);
+        return altNames.some(alt => {
+          const normAlt = normCuit(alt);
+          return normAlt.length >= 10 && normAlt === cuit;
+        });
+      });
       if (found) {
         consortiumRow = found;
         matchMethod = `CUIT (${cuit})`;

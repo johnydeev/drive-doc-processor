@@ -3,9 +3,14 @@
 ## 2026-04-02
 
 Highlights
-- **OCR resiliente**: llamada a OCR envuelta en try/catch en `pdfTextExtractor.service.ts`. Si falla, el pipeline continúa con el texto de pdf-parse sin explotar.
-- **OCR migrado a pdftoppm**: `ocr.service.ts` reescrito — usa `pdftoppm` (poppler-utils) en lugar de `pdfjs-dist` + `@napi-rs/canvas`. Más liviano y estable en Docker. `poppler-utils` agregado al Dockerfile.
-- **Upsert de Proveedores optimizado en sync-directory**: reemplazado `findFirst` + `update`/`create` por `upsert` directo con compound key `clientId_canonicalName`. Reduce overhead de 2 queries a 1 por proveedor. Nuevo constraint `@@unique([clientId, canonicalName])` en Provider. Migración: `20260402000100_provider_unique_client_canonical`.
+- **Tunnel estabilizado**: versión fija 2025.2.0, --no-autoupdate, --url http://web:3000.
+- **Zona horaria corregida**: logs ahora muestran hora UTC-3 Buenos Aires.
+- **Mejoras de logging**: separadores visuales entre archivos, ciclos del scheduler y jobs del worker. Log de archivos encontrados vs límite de lote.
+- **Fix scheduler requeue**: jobs COMPLETED/FAILED no bloquean reprocesamiento. Filtro status: { in: ["PENDING", "PROCESSING"] } en existingJob.
+- **Feature Reprocesar Sin Asignar**: botón ♻️ en sidebar del panel cliente. Endpoints GET /api/client/unassigned/preview y POST /api/client/unassigned/requeue.
+- **OCR híbrido**: detección semántica del bloque emisor AFIP + pdftoppm/Tesseract para PDFs con imagen. Reemplazado pdfjs-dist por pdftoppm. poppler-utils en Dockerfile.
+- **CUITs alternativos de consorcio**: pipeline verifica CUITs en matchNames. Permite múltiples CUITs por consorcio sin cambios de schema.
+- **Sync-directory optimizado**: upsert de Proveedores con constraint único @@unique([clientId, canonicalName]). Logs de timing por etapa. Migración: 20260402000100_provider_unique_client_canonical.
 
 ## 2026-03-30
 

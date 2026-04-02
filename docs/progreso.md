@@ -210,17 +210,37 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
   - Nueva descripción estructural del layout AFIP estándar (bloque emisor / comprobante / receptor)
   - Orientación explícita para distinguir el CUIT del emisor del receptor
   - `providerTaxId` puede ser null sin romper el matching (allTaxIds como fallback)
-- **OCR resiliente con try/catch** (02/04/2026)
-  - `pdfTextExtractor.service.ts`: llamada a OCR envuelta en try/catch. Si OCR falla, el pipeline continúa con el texto de pdf-parse en vez de explotar
-- **OCR migrado de pdfjs-dist a pdftoppm** (02/04/2026)
-  - `ocr.service.ts` reescrito: usa `pdftoppm` (poppler-utils) para convertir PDF a PNG y luego Tesseract para OCR
-  - Eliminados imports de `pdfjs-dist` y `@napi-rs/canvas`
-  - `poppler-utils` agregado al Dockerfile (stage runner)
+- **Tunnel estabilizado** (02/04/2026)
+  - Versión fija `cloudflare/cloudflared:2025.2.0` en docker-compose.yml
+  - Agregado `--no-autoupdate` y `--url http://web:3000` al comando
+  - Zona horaria corregida en logs: UTC-3 Buenos Aires usando `toLocaleString("sv-SE", { timeZone: "America/Argentina/Buenos_Aires" })`
+- **Mejoras de logging** (02/04/2026)
+  - Separadores visuales entre archivos procesados (divider en fileStart/fileCompleted)
+  - Separadores en ciclos del scheduler (═ para fin, ─ para inicio)
+  - Separador en worker al reclamar job
+  - Timestamp con zona horaria correcta UTC-3
+  - Log de cantidad de archivos encontrados en jobsQueued con indicador de límite de lote
+- **Fix scheduler: jobs COMPLETED/FAILED no bloquean reprocesamiento** (02/04/2026)
+  - scheduler.ts: filtro `status: { in: ["PENDING", "PROCESSING"] }` en existingJob
+  - Permite reprocesar archivos que volvieron a Pendientes desde Sin Asignar
+- **OCR híbrido para PDFs con bloque emisor en imagen** (02/04/2026)
+  - Detección semántica del bloque emisor AFIP en pdfTextExtractor.service.ts buscando etiquetas exclusivas: "ING. BRUTOS", "INICIO DE ACTIVIDADES", "RESPONSABLE INSCRIPTO", "MONOTRIBUTO"
+  - Si el bloque no está en texto → activa OCR con pdftoppm + Tesseract
+  - OcrService reescrito: usa pdftoppm (poppler-utils) en lugar de pdfjs-dist
+  - Textos combinados con separador --- OCR --- para máxima información a la IA
+  - Fallo silencioso: si OCR falla → continúa con texto de pdf-parse → Sin Asignar
+  - poppler-utils agregado al Dockerfile
+  - Validado con facturas de emisor en imagen: primera extracción exitosa automática
+- **CUITs alternativos de consorcio en matchNames** (02/04/2026)
+  - El pipeline verifica CUITs en matchNames al hacer matching por CUIT de allTaxIds
+  - Permite consorcios con múltiples CUITs sin cambios de schema
+  - Uso: agregar CUIT alternativo en columna Aliases del archivo ALTA
 - **Sync-directory: upsert de Proveedores optimizado** (02/04/2026)
   - Reemplazado `findFirst` + `update`/`create` por `upsert` directo con compound key `clientId_canonicalName`
   - Reduce de 2 queries a 1 por proveedor (menos overhead en la transacción)
   - Nuevo constraint `@@unique([clientId, canonicalName])` en Provider
   - Migración: `20260402000100_provider_unique_client_canonical`
+  - Logs de timing por etapa: Rubros, Coeficientes, Consorcios, Proveedores, LspServices
 - **Feature "Reprocesar Sin Asignar"** (30/03/2026)
   - Botón "♻️ Sin Asignar" en sidebar del panel cliente (solo rol CLIENT)
   - Lista archivos en carpeta Sin Asignar de Drive via preview endpoint

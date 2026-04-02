@@ -4,6 +4,42 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-02 — CUITs alternativos de consorcio en matchNames
+
+### Problema
+Algunos consorcios tienen más de un CUIT (ej: re-inscripción en AFIP). El schema solo soporta un campo `cuit` por consorcio. Cuando una factura usa el CUIT alternativo, el matching por CUIT falla y el archivo va a Sin Asignar.
+
+### Decisión
+Reutilizar el campo `matchNames` para almacenar CUITs alternativos (pipe-separated junto con aliases de nombre). El pipeline detecta si un valor en `matchNames` tiene formato CUIT (10+ dígitos numéricos tras normalización) y lo incluye en el matching por CUIT de allTaxIds. Sin migración — reutiliza infraestructura existente.
+
+### Uso
+En el archivo ALTA de Google Sheets, agregar el CUIT alternativo en la columna Aliases del consorcio: "30-71893736-8" (se guarda en matchNames).
+
+### Alternativas descartadas
+- Campo `cuitAlt` en schema: más limpio semánticamente pero requiere migración y cambios en sync-directory.
+- Actualizar el CUIT principal: no aplica cuando ambos CUITs son válidos simultáneamente.
+
+### Impacto
+- Modificado: `src/jobs/processPendingDocuments.job.ts` (matching CUIT consorcio)
+- Sin cambios en schema ni migraciones
+
+---
+
+## 2026-04-02 — OCR híbrido para PDFs con bloque emisor en imagen
+
+### Problema
+PDFs como Ikarus Seguridad tienen el bloque del emisor (nombre, CUIT) renderizado como imagen dentro del PDF. pdf-parse extrae el texto del cuerpo pero omite la imagen. El resultado no está vacío, por lo que el fallback a Tesseract no se activaba. La IA recibía texto sin CUIT del emisor y extraía proveedor=null.
+
+### Decisión
+Implementar detección semántica del bloque emisor AFIP en `pdfTextExtractor.service.ts`: si el texto extraído no contiene etiquetas exclusivas del emisor ("ING. BRUTOS", "INICIO DE ACTIVIDADES", "RESPONSABLE INSCRIPTO", "MONOTRIBUTO"), se activa OCR con pdftoppm + Tesseract. Los textos se combinan con separador `--- OCR ---`. OcrService reescrito para usar pdftoppm (poppler-utils) en lugar de pdfjs-dist + @napi-rs/canvas. Fallo silencioso: si OCR falla, el pipeline continúa con texto de pdf-parse.
+
+### Impacto
+- Reescrito: `src/services/ocr.service.ts` (pdftoppm en lugar de pdfjs-dist)
+- Modificado: `src/services/pdfTextExtractor.service.ts` (detección bloque emisor + try/catch)
+- Modificado: `Dockerfile` (agregado `poppler-utils`)
+
+---
+
 ## 2026-04-02 — OCR migrado de pdfjs-dist a pdftoppm
 
 ### Problema
