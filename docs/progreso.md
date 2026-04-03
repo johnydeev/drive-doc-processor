@@ -248,6 +248,19 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
   - Sin cambios en pipeline ni schema
   - Endpoints: `GET /api/client/unassigned/preview`, `POST /api/client/unassigned/requeue`
 
+- **Sistema de pagos parciales (Payment tracking)** (02/04/2026)
+  - Nueva tabla `Payment`: amount, paymentDate, installmentNumber, totalInstallments, driveFileId, driveFileUrl, observation
+  - Campos nuevos en Invoice: `isPaid` (Boolean), `remainingBalance` (Decimal)
+  - Eliminados campos Invoice: `receiptDriveFileId`, `receiptDriveFileUrl` (movidos a Payment)
+  - Dos modos: cuotas pactadas (monto fijo auto-calculado) y pagos libres (monto manual)
+  - Modo fijado en el primer pago, no se puede cambiar
+  - `isPaid` se activa automáticamente al llegar `remainingBalance` a 0
+  - Último pago en modo cuotas absorbe diferencias de redondeo
+  - Endpoints: GET/POST `/api/client/invoices/[id]/payments`, DELETE `.../[paymentId]`
+  - Endpoint legacy `receipt/route.ts` adaptado para crear Payment (pago total)
+  - UI: columna "Recibo" reemplazada por columna "Pago" con estado (Pagada / Resta $X / —)
+  - Migración: `20260402000200_add_payment_tracking`
+
 ---
 
 ## En progreso 🔄

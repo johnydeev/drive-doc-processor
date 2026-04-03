@@ -66,6 +66,7 @@ model Client {
   processingJobs       ProcessingJob[]
   schedulerStates      SchedulerState[]
   tokenUsages          TokenUsage[]
+  payments             Payment[]
 
   @@index([isActive])
   @@index([role, isActive])
@@ -125,8 +126,8 @@ model Invoice {
   providerTaxIdNorm   String       @default("")
   dueDateNorm         String       @default("")
   amountNorm          String       @default("")
-  receiptDriveFileId  String?
-  receiptDriveFileUrl String?
+  isPaid              Boolean      @default(false)
+  remainingBalance    Decimal?     @db.Decimal(14, 2)
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
   client              Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -137,6 +138,7 @@ model Invoice {
   rubroRef            Rubro?       @relation(fields: [rubroId], references: [id], onDelete: SetNull)
   lspServiceRef       LspService?  @relation(fields: [lspServiceId], references: [id], onDelete: SetNull)
   receipt             Receipt?     @relation("InvoiceReceipt")
+  payments            Payment[]
 
   @@unique([clientId, documentHash], map: "uq_invoice_document_hash")
   @@unique([clientId, boletaNumberNorm, providerTaxIdNorm, dueDateNorm, amountNorm], map: "uq_invoice_business_key")
@@ -365,4 +367,24 @@ model LspService {
 
   @@unique([consortiumId, provider, clientNumber])
   @@index([clientId, provider, clientNumber])
+}
+
+model Payment {
+  id                String   @id @default(cuid())
+  clientId          String
+  invoiceId         String
+  amount            Decimal  @db.Decimal(14, 2)
+  paymentDate       DateTime
+  installmentNumber Int?
+  totalInstallments Int?
+  driveFileId       String
+  driveFileUrl      String
+  observation       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  invoice           Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([invoiceId])
 }

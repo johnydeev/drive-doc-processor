@@ -28,8 +28,8 @@ type Invoice     = {
   tipoGasto: string; tipoComprobante: string | null; createdAt: string;
   coeficienteRef: { id: string; name: string; value: number } | null;
   rubroRef: { id: string; name: string } | null;
-  receiptDriveFileId: string | null;
-  receiptDriveFileUrl: string | null;
+  isPaid: boolean;
+  remainingBalance: number | null;
 };
 type ScannedData = {
   boletaNumber: string | null; provider: string | null; providerTaxId: string | null;
@@ -561,7 +561,7 @@ export default function ConsortiumsPage() {
       // Actualizar la invoice en el estado local con los nuevos campos
       setInvoices((prev) => prev.map((inv) =>
         inv.id === invoiceId
-          ? { ...inv, receiptDriveFileId: data.invoice.receiptDriveFileId, receiptDriveFileUrl: data.invoice.receiptDriveFileUrl }
+          ? { ...inv, isPaid: data.invoice.isPaid ?? inv.isPaid, remainingBalance: data.invoice.remainingBalance ?? inv.remainingBalance }
           : inv
       ));
     } catch (err) {
@@ -1059,28 +1059,16 @@ export default function ConsortiumsPage() {
                                 ? <a href={inv.sourceFileUrl} target="_blank" rel="noopener noreferrer" className={styles.fileLink}>Ver PDF</a>
                                 : "—"}
                             </td>
-                            {/* ── Columna recibo ── */}
+                            {/* ── Columna pago ── */}
                             <td>
-                              {uploadingReceiptId === inv.id ? (
-                                <span className={styles.receiptUploading}>Subiendo…</span>
-                              ) : inv.receiptDriveFileUrl ? (
-                                <a href={inv.receiptDriveFileUrl} target="_blank" rel="noopener noreferrer" className={styles.fileLink}>
-                                  📄 Ver
-                                </a>
+                              {inv.isPaid ? (
+                                <span className={styles.badgeOk}>Pagada</span>
+                              ) : inv.remainingBalance !== null ? (
+                                <span className={styles.badgeWarning}>
+                                  Resta ${Number(inv.remainingBalance).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                </span>
                               ) : (
-                                <button
-                                  type="button"
-                                  className={styles.receiptBtn}
-                                  onClick={() => {
-                                    if (receiptInputRef.current) {
-                                      receiptInputRef.current.dataset.invoiceId = inv.id;
-                                      receiptInputRef.current.click();
-                                    }
-                                  }}
-                                  title="Adjuntar recibo de pago"
-                                >
-                                  + Recibo
-                                </button>
+                                <span>—</span>
                               )}
                             </td>
                           </tr>

@@ -4,6 +4,26 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-02 — Sistema de pagos parciales: tabla Payment separada
+
+### Problema
+Las boletas (Invoice) podían tener un único comprobante de pago (`receiptDriveFileId`/`receiptDriveFileUrl`) pero no soportaban pagos parciales ni cuotas.
+
+### Decisión
+Tabla `Payment` separada (one-to-many con Invoice) en lugar de agregar campos de pago directamente a Invoice. Dos modos: cuotas pactadas (monto total / N cuotas, autoincremento) y pagos libres (monto manual). El modo se define en el primer pago y es inmutable. `isPaid` y `remainingBalance` en Invoice se actualizan automáticamente en cada transacción. El último pago de cuotas ajusta el monto para absorber redondeos.
+
+### Alternativas descartadas
+- Campos de pago directo en Invoice: no soporta múltiples pagos.
+- Tabla Payment + tabla Installment separada: overengineering; `installmentNumber`/`totalInstallments` en Payment es suficiente.
+
+### Impacto
+- Migración: `20260402000200_add_payment_tracking`
+- Nuevos archivos: `payment.repository.ts`, `invoices/[id]/payments/route.ts`, `invoices/[id]/payments/[paymentId]/route.ts`
+- Modificados: `schema.prisma`, `page.tsx` (consortiums), `receipt/route.ts`
+- Eliminados de Invoice: `receiptDriveFileId`, `receiptDriveFileUrl`
+
+---
+
 ## 2026-04-02 — CUITs alternativos de consorcio en matchNames
 
 ### Problema

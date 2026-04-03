@@ -3,6 +3,7 @@ import { requireClientSession } from "@/lib/clientAuth";
 import { getPrismaClient } from "@/lib/prisma";
 import { GoogleDriveService } from "@/services/googleDrive.service";
 import { resolveGoogleConfig, resolveFolders } from "@/lib/clientProcessingConfig";
+import { PaymentRepository, PaymentError } from "@/repositories/payment.repository";
 
 const MONTH_NAMES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -12,12 +13,8 @@ const MONTH_NAMES = [
 /**
  * POST /api/client/consortiums/[id]/invoices/[invoiceId]/receipt
  *
- * Sube un PDF de recibo de pago a Drive y guarda el fileId y URL en la Invoice.
- *
- * La carpeta de destino en Drive es:
- *   [receipts folder del cliente] / [Nombre consorcio] / [Mes Año]
- *
- * Si no hay receipts folder configurado, usa la carpeta scanned como raíz.
+ * Sube un PDF de recibo de pago a Drive y crea un Payment vinculado a la Invoice.
+ * Mantiene compatibilidad con la UI existente que sube recibos desde la tabla de boletas.
  */
 export async function POST(
   request: NextRequest,
@@ -126,63 +123,36 @@ export async function POST(
       return NextResponse.json({ ok: false, error: "Error al subir el archivo a Drive" }, { status: 500 });
     }
 
-    // ── Actualizar la Invoice con el fileId y URL ─────────────────────────
-    const updated = await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        receiptDriveFileId:  uploaded.id,
-        receiptDriveFileUrl: uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`,
-      },
-      select: {
-        id: true,
-        receiptDriveFileId: true,
-        receiptDriveFileUrl: true,
-      },
+    const driveFileUrl = uploaded.webViewLink ?? `https://drive.google.com/file/d/${uploaded.id}/view`;
+
+    // ── Crear Payment con el monto total de la invoice ───────────────────
+    const paymentRepo = new PaymentRepository();
+    const result = await paymentRepo.createPayment({
+      clientId,
+      invoiceId,
+      amount: invoice.amount ? Number(invoice.amount) : 0,
+      paymentDate: new Date(),
+      driveFileId: uploaded.id,
+      driveFileUrl,
     });
 
-    return NextResponse.json({ ok: true, invoice: updated });
+    return NextResponse.json({
+      ok: true,
+      invoice: {
+        id: result.invoice.id,
+        isPaid: result.invoice.isPaid,
+        remainingBalance: result.invoice.remainingBalance,
+      },
+      payment: result.payment,
+    });
   } catch (err) {
-    console.error("[receipt-upload]", err instanceof Error ? err.message : err);
-    return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : "Error interno" },
-      { status: 500 }
-    );
-  }
-}
-
-/**
- * DELETE /api/client/consortiums/[id]/invoices/[invoiceId]/receipt
- * Elimina la referencia al recibo (no borra el archivo de Drive).
- */
-export async function DELETE(
-  request: NextRequest,
-  context: { params: Promise<{ id: string; invoiceId: string }> }
-) {
-  const auth = requireClientSession(request);
-  if (auth.error) return auth.error;
-
-  const { id: consortiumId, invoiceId } = await context.params;
-  const clientId = auth.session.clientId;
-
-  try {
-    const prisma = getPrismaClient();
-
-    const invoice = await prisma.invoice.findFirst({
-      where: { id: invoiceId, clientId, consortiumId },
-      select: { id: true },
-    });
-
-    if (!invoice) {
-      return NextResponse.json({ ok: false, error: "Boleta no encontrada" }, { status: 404 });
+    if (err instanceof PaymentError) {
+      return NextResponse.json(
+        { ok: false, error: err.message },
+        { status: err.statusCode }
+      );
     }
-
-    await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: { receiptDriveFileId: null, receiptDriveFileUrl: null },
-    });
-
-    return NextResponse.json({ ok: true });
-  } catch (err) {
+    console.error("[receipt-upload]", err instanceof Error ? err.message : err);
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : "Error interno" },
       { status: 500 }

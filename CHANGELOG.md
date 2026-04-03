@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased] - 2026-04-02
+
+### Added
+- Sistema de pagos parciales: tabla `Payment` con soporte para cuotas pactadas y pagos libres
+- Campos `isPaid` y `remainingBalance` en Invoice
+- Endpoints GET/POST `/api/client/invoices/[id]/payments` y DELETE `.../[paymentId]`
+
+### Removed
+- Campos `receiptDriveFileId` y `receiptDriveFileUrl` de Invoice (reemplazados por `Payment.driveFileId`/`driveFileUrl`)
+
+---
+
 ## 2026-04-02
 
 Highlights
