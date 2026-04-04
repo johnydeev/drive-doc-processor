@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased] - 2026-04-04
+
+### Fixed
+- Sidebar de navegacion y lista de consorcios unificados en columna izquierda unica
+- Boletas del periodo ahora se renderizan correctamente en la tabla
+- Monto total del periodo corregido (suma en lugar de concatenacion de Decimals)
+- Boletas LSP integradas en tabla principal con badge identificador
+- Toggle dark/light ahora aplica el tema correctamente al documento
+- Fix build CSS Modules: variables de tema movidas a globals.css
+
+---
+
 ## [Unreleased] - 2026-04-02
 
 ### Added

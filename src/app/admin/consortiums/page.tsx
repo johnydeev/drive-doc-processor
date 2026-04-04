@@ -30,6 +30,7 @@ type Invoice     = {
   rubroRef: { id: string; name: string } | null;
   isPaid: boolean;
   remainingBalance: number | null;
+  lspServiceId: string | null;
 };
 type ScannedData = {
   boletaNumber: string | null; provider: string | null; providerTaxId: string | null;
@@ -132,6 +133,11 @@ export default function ConsortiumsPage() {
   // Theme (session-only, no localStorage)
   const [theme, setTheme] = useState<ThemeMode>("dark");
   const handleToggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+
+  // PROBLEMA 5: Aplicar tema al document
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   // Nav sidebar
   const [navCollapsed, setNavCollapsed] = useState(false);
@@ -359,11 +365,12 @@ export default function ConsortiumsPage() {
   const [consortiumError, setConsortiumError] = useState<string | null>(null);
   const [consortiumSuccess, setConsortiumSuccess] = useState<string | null>(null);
 
-  // matchNames editing
+  // matchNames editing (inside config modal)
   const [editingMatchNames, setEditingMatchNames] = useState(false);
   const [matchNamesValue, setMatchNamesValue] = useState("");
   const [savingMatchNames, setSavingMatchNames] = useState(false);
   const [matchNamesMsg, setMatchNamesMsg] = useState<string | null>(null);
+  const [showConfigModal, setShowConfigModal] = useState(false);
 
   // LspServices
   const [lspServices, setLspServices] = useState<LspService[]>([]);
@@ -721,7 +728,7 @@ export default function ConsortiumsPage() {
     return inv.boletaNumber?.toLowerCase().includes(q) || inv.provider?.toLowerCase().includes(q) || inv.detail?.toLowerCase().includes(q) || inv.providerTaxId?.includes(q);
   });
 
-  const totalAmount = filteredInvoices.reduce((s, i) => s + (i.amount ?? 0), 0);
+  const totalAmount = filteredInvoices.reduce((s, i) => s + (i.amount != null ? Number(i.amount) : 0), 0);
   const duplicates = filteredInvoices.filter((i) => i.isDuplicate).length;
 
   if (!accessChecked) return null;
@@ -751,7 +758,7 @@ export default function ConsortiumsPage() {
         <div className={styles.navSidebarOverlay} onClick={() => setNavMobileOpen(false)} />
       )}
 
-      {/* Global nav sidebar */}
+      {/* ── Columna 1: NavSidebar ── */}
       <aside className={`${styles.navSidebar} ${navCollapsed ? styles.navSidebarCollapsed : ""} ${navMobileOpen ? styles.navSidebarOpen : ""}`}>
         <div className={styles.navSidebarLogo}>
           <div className={styles.navSidebarLogoIcon}>🏢</div>
@@ -784,18 +791,50 @@ export default function ConsortiumsPage() {
               {!navCollapsed && <span className={styles.navSidebarItemLabel}>{loadingUnassigned ? "Consultando..." : "Sin Asignar"}</span>}
             </button>
           )}
-          <button type="button" className={styles.navSidebarItem} onClick={() => { handleLogout(); setNavMobileOpen(false); }}>
-            <span className={styles.navSidebarItemIcon}>🚪</span>
-            {!navCollapsed && <span className={styles.navSidebarItemLabel}>Cerrar sesión</span>}
-          </button>
         </nav>
+        <div style={{ flex: 1 }} />
+        <button type="button" className={styles.navSidebarItem} onClick={() => { handleLogout(); setNavMobileOpen(false); }}>
+          <span className={styles.navSidebarItemIcon}>🚪</span>
+          {!navCollapsed && <span className={styles.navSidebarItemLabel}>Cerrar sesión</span>}
+        </button>
         <button type="button" className={styles.navSidebarCollapse} onClick={() => setNavCollapsed((c) => !c)}>
           {navCollapsed ? "»" : "«"}
         </button>
       </aside>
 
-      {/* Toolbar */}
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+      {/* ── Columna 2: Lista de consorcios ── */}
+      <aside className={styles.sidebar}>
+        <div className={styles.sidebarHeader}>
+          <span className={styles.sidebarTitle}>Consorcios</span>
+          <span className={styles.sidebarCount}>{loadingList ? "..." : consortiums.length}</span>
+        </div>
+        {loadingList && <div className={styles.sidebarLoading}>Cargando...</div>}
+        {listError && <div className={styles.sidebarError}>{listError}</div>}
+        <nav className={styles.sidebarNav}>
+          {consortiums.map((c) => {
+            const active = c.periods.find((p) => p.status === "ACTIVE");
+            const isSelected = selectedId === c.id;
+            return (
+              <button key={c.id} type="button"
+                className={`${styles.sidebarItem} ${isSelected ? styles.sidebarItemActive : ""}`}
+                onClick={() => void handleSelectConsortium(c)}>
+                <span className={styles.sidebarItemIcon}>🏢</span>
+                <span className={styles.sidebarItemBody}>
+                  <span className={styles.sidebarItemName}>{c.rawName}</span>
+                  <span className={styles.sidebarItemMeta}>{active ? formatPeriod(active) : "Sin periodo"} · {c._count.invoices} bol.</span>
+                </span>
+                {isSelected && <span className={styles.sidebarItemArrow}>›</span>}
+              </button>
+            );
+          })}
+          {!loadingList && !listError && consortiums.length === 0 && (
+            <p className={styles.sidebarEmpty}>No hay consorcios cargados.</p>
+          )}
+        </nav>
+      </aside>
+
+      {/* ── Columna 3: Contenido principal ── */}
+      <div className={styles.contentCol}>
         <div className={styles.toolbar}>
           <div className={styles.toolbarLeft}>
             <button type="button" className={styles.hamburger} onClick={() => setNavMobileOpen(true)}>☰</button>
@@ -810,8 +849,8 @@ export default function ConsortiumsPage() {
                 Ejecutar ahora
               </button>
             )}
-            {toolbarInfo && <span style={{ fontSize: "11px", color: "#7dff9b" }}>{toolbarInfo}</span>}
-            {toolbarError && <span style={{ fontSize: "11px", color: "#ff9999" }}>{toolbarError}</span>}
+            {toolbarInfo && <span style={{ fontSize: "11px", color: "var(--success)" }}>{toolbarInfo}</span>}
+            {toolbarError && <span style={{ fontSize: "11px", color: "var(--error)" }}>{toolbarError}</span>}
           </div>
           <div className={styles.toolbarRight}>
             <button type="button"
@@ -825,7 +864,7 @@ export default function ConsortiumsPage() {
 
         <header className={styles.header}>
           <div>
-            <p className={styles.eyebrow}>Gestión de consorcios</p>
+            <p className={styles.eyebrow}>Gestion de consorcios</p>
             <h1>Edificios</h1>
           </div>
           <div className={styles.headerActions}>
@@ -840,37 +879,6 @@ export default function ConsortiumsPage() {
             </button>
           </div>
         </header>
-
-        <div className={styles.layout}>
-          <aside className={styles.sidebar}>
-          <div className={styles.sidebarHeader}>
-            <span className={styles.sidebarTitle}>Consorcios</span>
-            <span className={styles.sidebarCount}>{loadingList ? "…" : consortiums.length}</span>
-          </div>
-          {loadingList && <div className={styles.sidebarLoading}>Cargando...</div>}
-          {listError && <div className={styles.sidebarError}>{listError}</div>}
-          <nav className={styles.sidebarNav}>
-            {consortiums.map((c) => {
-              const active = c.periods.find((p) => p.status === "ACTIVE");
-              const isSelected = selectedId === c.id;
-              return (
-                <button key={c.id} type="button"
-                  className={`${styles.sidebarItem} ${isSelected ? styles.sidebarItemActive : ""}`}
-                  onClick={() => void handleSelectConsortium(c)}>
-                  <span className={styles.sidebarItemIcon}>🏢</span>
-                  <span className={styles.sidebarItemBody}>
-                    <span className={styles.sidebarItemName}>{c.rawName}</span>
-                    <span className={styles.sidebarItemMeta}>{active ? formatPeriod(active) : "Sin período"} · {c._count.invoices} boletas</span>
-                  </span>
-                  {isSelected && <span className={styles.sidebarItemArrow}>›</span>}
-                </button>
-              );
-            })}
-            {!loadingList && !listError && consortiums.length === 0 && (
-              <p className={styles.sidebarEmpty}>No hay consorcios cargados.</p>
-            )}
-          </nav>
-        </aside>
 
         <main className={styles.main}>
           {!selectedId && (
@@ -894,43 +902,15 @@ export default function ConsortiumsPage() {
                   <button type="button" className={styles.addInvoiceBtn} onClick={() => { resetInvoiceForm(); setShowInvoiceModal(true); }}>
                     + Cargar boleta
                   </button>
+                  <button type="button" className={styles.configBtn} onClick={() => {
+                    setMatchNamesValue(selectedConsortium.matchNames ?? "");
+                    setEditingMatchNames(false);
+                    setMatchNamesMsg(null);
+                    setShowConfigModal(true);
+                  }}>
+                    Configuración
+                  </button>
                 </div>
-              </div>
-
-              {/* ── matchNames editing ── */}
-              <div className={styles.matchNamesSection}>
-                <div className={styles.matchNamesHeader}>
-                  <span className={styles.matchNamesLabel}>Nombres alternativos (matching interno)</span>
-                  {!editingMatchNames && (
-                    <button type="button" className={styles.matchNamesEditBtn} onClick={() => {
-                      setMatchNamesValue(selectedConsortium.matchNames ?? "");
-                      setEditingMatchNames(true);
-                      setMatchNamesMsg(null);
-                    }}>Editar</button>
-                  )}
-                </div>
-                {editingMatchNames ? (
-                  <div className={styles.matchNamesEdit}>
-                    <input
-                      className={styles.formInput}
-                      value={matchNamesValue}
-                      onChange={(e) => setMatchNamesValue(e.target.value)}
-                      placeholder="NOMBRE ALT 1|NOMBRE ALT 2|NOMBRE ALT 3"
-                    />
-                    <p className={styles.matchNamesHelp}>Separar con | (pipe). Estos nombres se usan internamente para identificar el consorcio en facturas.</p>
-                    <div className={styles.matchNamesActions}>
-                      <button type="button" className={styles.ghostBtn} onClick={() => setEditingMatchNames(false)} disabled={savingMatchNames}>Cancelar</button>
-                      <button type="button" className={styles.addInvoiceBtn} onClick={handleSaveMatchNames} disabled={savingMatchNames}>
-                        {savingMatchNames ? "Guardando..." : "Guardar"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className={styles.matchNamesValue}>
-                    {selectedConsortium.matchNames || <span style={{ opacity: 0.4 }}>Sin nombres alternativos</span>}
-                  </p>
-                )}
-                {matchNamesMsg && <p className={styles.infoMsg} style={{ marginTop: 6 }}>{matchNamesMsg}</p>}
               </div>
 
               {/* ── LspServices section ── */}
@@ -1024,14 +1004,14 @@ export default function ConsortiumsPage() {
                           <th>N° Boleta</th><th>Proveedor</th><th>CUIT</th><th>Comprobante</th>
                           <th>Detalle</th><th>Emisión</th><th>Vencimiento</th><th>Monto</th>
                           <th>Tipo</th><th>Rubro</th><th>Coef.</th><th>Estado</th>
-                          <th>Archivo</th><th>Recibo</th>
+                          <th>Archivo</th><th>Pago</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredInvoices.map((inv) => (
                           <tr key={inv.id} className={inv.isDuplicate ? styles.rowDuplicate : ""}>
                             <td className={styles.tdMono}>{inv.boletaNumber ?? "—"}</td>
-                            <td>{inv.provider ?? "—"}</td>
+                            <td>{inv.provider ?? "—"}{inv.lspServiceId && <span className={styles.badgeLsp}>LSP</span>}</td>
                             <td className={styles.tdMono}>{inv.providerTaxId ?? "—"}</td>
                             <td className={styles.tdMono}>{inv.tipoComprobante ?? "—"}</td>
                             <td className={styles.tdDetail}>{inv.detail ?? inv.observation ?? "—"}</td>
@@ -1081,8 +1061,54 @@ export default function ConsortiumsPage() {
             </>
           )}
         </main>
-      </div>
-      </div>{/* close flex wrapper */}
+      </div>{/* close contentCol */}
+
+      {/* ── Config modal ── */}
+      {showConfigModal && selectedConsortium && (
+        <div className={styles.modalOverlay} onClick={() => !savingMatchNames && setShowConfigModal(false)}>
+          <div className={styles.modalLarge} onClick={(e) => e.stopPropagation()}>
+            <h3 className={styles.modalTitle}>Configuración — {selectedConsortium.rawName}</h3>
+            <p className={styles.modalSubtitle}>Ajustes de matching y datos internos del consorcio</p>
+
+            <div className={styles.configSection}>
+              <h4 className={styles.configSectionTitle}>Nombres alternativos (matching interno)</h4>
+              <p className={styles.configSectionDesc}>
+                Separar con | (pipe). Estos nombres se usan internamente para identificar el consorcio en facturas.
+              </p>
+              {!editingMatchNames ? (
+                <>
+                  <p className={styles.matchNamesValue}>
+                    {matchNamesValue || <span style={{ opacity: 0.4 }}>Sin nombres alternativos</span>}
+                  </p>
+                  <div className={styles.matchNamesActions} style={{ marginTop: 8 }}>
+                    <button type="button" className={styles.matchNamesEditBtn} onClick={() => setEditingMatchNames(true)}>Editar</button>
+                  </div>
+                </>
+              ) : (
+                <div className={styles.matchNamesEdit}>
+                  <input
+                    className={styles.formInput}
+                    value={matchNamesValue}
+                    onChange={(e) => setMatchNamesValue(e.target.value)}
+                    placeholder="NOMBRE ALT 1|NOMBRE ALT 2|NOMBRE ALT 3"
+                  />
+                  <div className={styles.matchNamesActions}>
+                    <button type="button" className={styles.ghostBtn} onClick={() => setEditingMatchNames(false)} disabled={savingMatchNames}>Cancelar</button>
+                    <button type="button" className={styles.addInvoiceBtn} onClick={handleSaveMatchNames} disabled={savingMatchNames}>
+                      {savingMatchNames ? "Guardando..." : "Guardar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {matchNamesMsg && <p className={styles.infoMsg} style={{ marginTop: 6 }}>{matchNamesMsg}</p>}
+            </div>
+
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.ghostBtn} onClick={() => setShowConfigModal(false)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Consortium mismatch modal — z-index 200 ── */}
       {showMismatchModal && (

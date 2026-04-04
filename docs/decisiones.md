@@ -4,6 +4,20 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-04 — Unificacion sidebar + correcciones UX consorcios
+
+### Problema
+5 bugs en page.tsx de consorcios: sidebar duplicado (navSidebar + sidebar separados), boletas sin renderizar (page flex-direction:column rompia el layout row), monto total concatenado (Prisma Decimal + number = string), tabla LSP sin badge identificador, toggle de tema sin efecto en DOM.
+
+### Decision
+Fusionar navSidebar y sidebar de consorcios en una sola columna izquierda. Solo los botones de navegacion colapsan. Correccion de reduce() para sumar Decimals con `Number()`. Badge visual "LSP" en la columna proveedor. useEffect para aplicar `data-theme` al `document.documentElement`. CSS migrado a variables CSS para soporte completo dark/light.
+
+### Impacto
+- Modificados: `page.tsx`, `page.module.css`
+- Sin cambios de schema ni migraciones
+
+---
+
 ## 2026-04-02 — Sistema de pagos parciales: tabla Payment separada
 
 ### Problema

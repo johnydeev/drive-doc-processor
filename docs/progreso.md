@@ -1,6 +1,6 @@
 # Progreso del proyecto — drive-doc-processor
 
-Actualizado al 02/04/2026 (sesión 22).
+Actualizado al 04/04/2026 (sesión 23).
 
 ---
 
@@ -260,6 +260,14 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
   - Endpoint legacy `receipt/route.ts` adaptado para crear Payment (pago total)
   - UI: columna "Recibo" reemplazada por columna "Pago" con estado (Pagada / Resta $X / —)
   - Migración: `20260402000200_add_payment_tracking`
+- **Fix UX pagina de consorcios** (04/04/2026)
+  - Sidebar unificado: navSidebar + lista de consorcios en columna izquierda unica, botones colapsan a icono
+  - Fix render de boletas: filas de invoices ahora se muestran correctamente (layout page flex-direction: row)
+  - Fix total periodo: suma correcta de montos Decimal con `Number()` en lugar de concatenacion
+  - Badge "LSP" en columna proveedor para boletas con `lspServiceId`
+  - Fix toggle de tema: aplica `data-theme` a `document.documentElement` via useEffect
+  - CSS migrado a variables CSS (`--bg`, `--text`, `--border`, etc.) para soporte dark/light
+  - Fix build: variables CSS movidas a `globals.css` (CSS Modules no permite selectores globales)
 
 ---
 
