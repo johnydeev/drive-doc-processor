@@ -2,6 +2,11 @@
 
 ## [Unreleased] - 2026-04-04
 
+### Changed
+- Layout refactorizado a 3 columnas independientes: navSidebar | lista consorcios | contenido
+- Edicion de matchNames movida a modal de configuracion (boton "Configuracion" en detailActions)
+- Boton "Cerrar sesion" reubicado al fondo del navSidebar con spacer flex
+
 ### Fixed
 - Sidebar de navegacion y lista de consorcios unificados en columna izquierda unica
 - Boletas del periodo ahora se renderizan correctamente en la tabla

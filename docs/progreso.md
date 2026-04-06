@@ -268,6 +268,14 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
   - Fix toggle de tema: aplica `data-theme` a `document.documentElement` via useEffect
   - CSS migrado a variables CSS (`--bg`, `--text`, `--border`, etc.) para soporte dark/light
   - Fix build: variables CSS movidas a `globals.css` (CSS Modules no permite selectores globales)
+- **Refactor layout 3 columnas + modal de configuracion** (04/04/2026)
+  - Layout separado en 3 columnas independientes: navSidebar (colapsable) | lista consorcios (fija 220px) | contenido
+  - Lista de consorcios ya no se oculta al colapsar el nav
+  - Edicion de matchNames movida de inline a modal de configuracion
+  - Boton "Configuracion" en detailActions abre el modal
+  - Boton "Cerrar sesion" reubicado al fondo del navSidebar con spacer flex
+  - En mobile (≤1024px) sidebar de consorcios se oculta (acceso via nav mobile)
+  - Nuevas clases CSS: `.sidebar`, `.contentCol`, `.configBtn`, `.configSection`, `.configSectionTitle`, `.configSectionDesc`
 
 ---
 

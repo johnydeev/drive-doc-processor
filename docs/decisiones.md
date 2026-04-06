@@ -4,16 +4,32 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
-## 2026-04-04 — Unificacion sidebar + correcciones UX consorcios
+## 2026-04-04 — Refactor layout 3 columnas + modal configuracion
 
 ### Problema
-5 bugs en page.tsx de consorcios: sidebar duplicado (navSidebar + sidebar separados), boletas sin renderizar (page flex-direction:column rompia el layout row), monto total concatenado (Prisma Decimal + number = string), tabla LSP sin badge identificador, toggle de tema sin efecto en DOM.
+El layout fusionaba navSidebar y lista de consorcios en un solo `<aside>`, lo que hacía que colapsar el nav también ocultara la lista. Además, la edicion de matchNames estaba inline ocupando espacio permanente en el área de contenido.
 
 ### Decision
-Fusionar navSidebar y sidebar de consorcios en una sola columna izquierda. Solo los botones de navegacion colapsan. Correccion de reduce() para sumar Decimals con `Number()`. Badge visual "LSP" en la columna proveedor. useEffect para aplicar `data-theme` al `document.documentElement`. CSS migrado a variables CSS para soporte completo dark/light.
+Separar en 3 columnas independientes: navSidebar (colapsable, 220px/56px) | sidebar de consorcios (fija 220px) | contenido. La lista de consorcios ya no depende del estado colapsado del nav. La edicion de matchNames se movió a un modal de configuración accesible via botón "Configuración" en detailActions. El botón "Cerrar sesión" se reubicó al fondo del navSidebar con un spacer flex. En mobile (≤1024px) el sidebar de consorcios se oculta (los consorcios se acceden via el nav mobile).
 
 ### Impacto
 - Modificados: `page.tsx`, `page.module.css`
+- Nuevas clases CSS: `.sidebar`, `.contentCol`, `.configBtn`, `.configSection`, `.configSectionTitle`, `.configSectionDesc`
+- Nuevo estado: `showConfigModal`
+- Sin cambios de schema ni migraciones
+
+---
+
+## 2026-04-04 — Correcciones UX consorcios + fix build CSS Modules
+
+### Problema
+5 bugs en page.tsx de consorcios: sidebar duplicado, boletas sin renderizar (page flex-direction:column rompia el layout row), monto total concatenado (Prisma Decimal + number = string), tabla LSP sin badge identificador, toggle de tema sin efecto en DOM. Ademas, build roto por selectores globales `[data-theme]` en CSS Modules.
+
+### Decision
+Correccion de reduce() para sumar Decimals con `Number()`. Badge visual "LSP" en la columna proveedor. useEffect para aplicar `data-theme` al `document.documentElement`. Variables de tema movidas a globals.css (CSS Modules no permite selectores globales).
+
+### Impacto
+- Modificados: `page.tsx`, `page.module.css`, `globals.css`
 - Sin cambios de schema ni migraciones
 
 ---

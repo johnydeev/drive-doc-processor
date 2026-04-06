@@ -75,7 +75,7 @@
   align-items: center;
 }
 
-/* ── Layout (unused — sidebar is inside navSidebar now) ── */
+/* ── Sidebar internals (consortium list items) ── */
 
 .sidebarHeader {
   display: flex;
@@ -669,7 +669,7 @@
   transform: translateX(22px);
 }
 
-/* ── Global nav sidebar (left) — unified column ── */
+/* ── Global nav sidebar (left) ── */
 .navSidebar {
   width: 220px;
   flex-shrink: 0;
@@ -871,26 +871,42 @@
   margin-left: 6px;
 }
 
-/* ── matchNames section ── */
-.matchNamesSection {
+/* ── Config button ── */
+.configBtn {
+  background: rgba(255,255,255,0.06);
+  color: #c0ccee;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+.configBtn:hover { background: rgba(255,255,255,0.12); transform: translateY(-1px); }
+
+/* ── Config modal sections ── */
+.configSection {
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: 10px;
-  padding: 12px 16px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.configSectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin-bottom: 4px;
+}
+.configSectionDesc {
+  font-size: 12px;
+  color: var(--text-muted);
   margin-bottom: 12px;
+  line-height: 1.4;
 }
-.matchNamesHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.matchNamesLabel {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #7a8fb5;
-}
+
+/* ── matchNames (reused inside config modal) ── */
 .matchNamesEditBtn {
   background: none;
   border: 1px solid rgba(91,140,247,0.3);
@@ -1024,6 +1040,9 @@
   }
   .navSidebarOverlay {
     display: block;
+  }
+  .sidebar {
+    display: none;
   }
   .hamburger {
     display: flex;
