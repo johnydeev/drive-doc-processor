@@ -75,6 +75,7 @@ const DEFAULT_MAPPING: SheetsRowMapping = {
   sourceFileUrl: "K",
   isDuplicate: "L",
   period: "M",
+  paymentStatus: "N",
 };
 
 function createBaseSummary(totalFound: number): ProcessJobSummary {
@@ -585,6 +586,7 @@ async function processDriveFile(
 
     extracted.sourceFileUrl = sourceFileUrl;
     extracted.isDuplicate = isDuplicate ? "YES" : "NO";
+    extracted.paymentStatus = "Sin pagar";
 
     const assignment = await resolveAssignment(
       extracted, cid, file.id, consortiumRepository, providerRepository, lspProvider

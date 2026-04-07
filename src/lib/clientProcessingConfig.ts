@@ -32,6 +32,7 @@ export function resolveMapping(client: ProcessingClient): SheetsRowMapping | und
     "sourceFileUrl",
     "isDuplicate",
     "period",
+    "paymentStatus",
   ];
 
   const parsed = raw as Record<string, unknown>;

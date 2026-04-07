@@ -18,6 +18,7 @@ export interface SheetsRowMapping {
   sourceFileUrl: string;
   isDuplicate: string;
   period: string;
+  paymentStatus: string;
 }
 
 export interface InsertRowResult {
@@ -39,6 +40,7 @@ const HEADER_BY_FIELD: Record<keyof SheetsRowMapping, string> = {
   sourceFileUrl: "URL_ARCHIVO",
   isDuplicate: "ES_DUPLICADO",
   period: "PERIODO",
+  paymentStatus: "ESTADO PAGO",
 };
 
 /**

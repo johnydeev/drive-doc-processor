@@ -22,6 +22,7 @@ const DEFAULT_MAPPING: SheetsRowMapping = {
   sourceFileUrl: "K",
   isDuplicate: "L",
   period: "M",
+  paymentStatus: "N",
 };
 
 const TIPO_GASTO_VALUES = ["ORDINARIO", "EXTRAORDINARIO", "PARTICULAR"] as const;
@@ -198,6 +199,7 @@ export async function POST(
             period:        period ? `${String(period.month).padStart(2, "0")}/${period.year}` : null,
             sourceFileUrl: null,
             isDuplicate:   "NO",
+            paymentStatus: "Sin pagar",
           };
           await sheetsService.insertRow(sheetName, sheetData, mapping);
         }

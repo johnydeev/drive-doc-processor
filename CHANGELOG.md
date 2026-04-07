@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased] - 2026-04-07
+
+### Added
+- Columna "ESTADO PAGO" en Google Sheets (columna N), valor inicial "Sin pagar" al insertar boleta
+
+---
+
 ## [Unreleased] - 2026-04-04
 
 ### Changed

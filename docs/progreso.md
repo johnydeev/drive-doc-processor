@@ -38,6 +38,7 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 - **ESLint configurado** — typescript-eslint + @next/eslint-plugin-next (21/03/2026)
 - **Cloudflare Tunnel** integrado en docker-compose (21/03/2026)
 - **Fixes de build**: encoding UTF-8 en close-period/route.ts, async params en receipt/route.ts, clientAuth.ts creado, type cast en scan/route.ts (21/03/2026)
+- **Columna ESTADO PAGO en Google Sheets** (07/04/2026) — Nuevo campo `paymentStatus` en `SheetsRowMapping`, `HEADER_BY_FIELD`, `DEFAULT_MAPPING` y `ExtractedDocumentData`. Columna N en Sheets con header "ESTADO PAGO". Valor inicial "Sin pagar" al procesar/cargar boleta. Actualización retroactiva de pagos existentes: pendiente (mejora futura)
 - **Auditoría de producción Docker** — revisión completa de dependencias, env vars, migraciones y Docker setup (23/03/2026)
   - TypeScript compila sin errores, ESLint solo 8 warnings menores (variables no usadas)
   - `build:jobs` compila correctamente
