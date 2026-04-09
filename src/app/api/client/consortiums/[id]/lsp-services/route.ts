@@ -93,7 +93,7 @@ export async function POST(
       );
     }
 
-    const normalizedClientNumber = stripLeadingZeros(clientNumber.trim());
+    const normalizedClientNumber = stripLeadingZeros(clientNumber.trim().replace(/\s+/g, ""));
 
     const existing = await prisma.lspService.findFirst({
       where: { consortiumId, provider, clientNumber: normalizedClientNumber },

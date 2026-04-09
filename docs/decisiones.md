@@ -4,6 +4,62 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-09 — Fix normalización clientNumber con espacios internos
+
+### Problema
+La normalización de clientNumber solo eliminaba ceros a la izquierda. Edenor formatea el número de cuenta con espacios (ej: "8 620 004 726") mientras la DB lo guarda sin espacios. El lookup de LspService fallaba silenciosamente y lspServiceId quedaba NULL.
+
+### Decisión
+Normalización en dos pasos: primero `.replace(/\s+/g, "")` para eliminar todos los espacios, luego `.replace(/^0+/, "")` para eliminar ceros. Aplicado en los 3 puntos donde se procesa clientNumber: pipeline, sync-directory y endpoint UI.
+
+### Impacto
+- Modificados: `processPendingDocuments.job.ts`, `sync-directory/route.ts`, `lsp-services/route.ts`
+- Sin cambios de schema ni migraciones
+
+---
+
+## 2026-04-09 — Bloqueo de boletas LSP con clientNumber no registrado
+
+### Problema
+El pipeline procesaba boletas LSP aunque el clientNumber extraído no existiera en la tabla LspService. Esto generaba boletas en Sheets sin vínculo al servicio correcto.
+
+### Decisión
+Si se detecta lspProvider y el lookup de LspService falla → `unassigned: true` con razón descriptiva. El archivo se mueve a Sin Asignar en Drive. No se guarda Invoice ni se escribe en Sheets. El administrador debe cargar el LspService correspondiente y luego usar "Reprocesar Sin Asignar".
+
+### Impacto
+- Modificados: `processPendingDocuments.job.ts`, `logger.ts`
+- Sin cambios de schema ni migraciones
+
+---
+
+## 2026-04-09 — Convención de nombres de campos en inglés
+
+### Problema
+Los campos `banco` y `claveSuterh` se crearon en español, inconsistente con el resto del schema (`canonicalName`, `matchNames`, `paymentAlias`, etc.).
+
+### Decisión
+Todos los campos nuevos del schema usan camelCase en inglés. Rename `banco`→`bank`, `claveSuterh`→`suterhKey`. El header visible en Sheets ("BANCO") no cambia — es presentación, no schema.
+
+### Impacto
+- Migración: `20260409000100_rename_consortium_banco_suterh`
+- Modificados: `schema.prisma` + todos los archivos que referenciaban `banco`/`claveSuterh`
+
+---
+
+## 2026-04-07 — Campos banco y claveSuterh en Consortium
+
+### Problema
+Los consorcios necesitan registrar el banco asociado (visible en Sheets) y la clave SUTERH (dato interno).
+
+### Decisión
+Dos campos nullable en Consortium. Solo `banco` va a Sheets (columna O). `claveSuterh` es dato interno sin UI por ahora. Sin UI de edición en esta iteración.
+
+### Impacto
+- Migración: `20260407000100_add_consortium_banco_suterh`
+- Modificados: `schema.prisma`, `googleSheets.service.ts`, `clientProcessingConfig.ts`, `processPendingDocuments.job.ts`, `invoices/route.ts`, `extractedDocument.types.ts`
+
+---
+
 ## 2026-04-04 — Refactor layout 3 columnas + modal configuracion
 
 ### Problema

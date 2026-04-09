@@ -76,6 +76,7 @@ const DEFAULT_MAPPING: SheetsRowMapping = {
   isDuplicate: "L",
   period: "M",
   paymentStatus: "N",
+  bank: "O",
 };
 
 function createBaseSummary(totalFound: number): ProcessJobSummary {
@@ -176,6 +177,7 @@ interface AssignmentResult {
   canonicalProvider: string | null;
   canonicalProviderTaxId: string | null;
   providerPaymentAlias: string | null;
+  consortiumBank: string | null;
 }
 
 async function resolveAssignment(
@@ -191,14 +193,14 @@ async function resolveAssignment(
     periodLabel: null, lspServiceId: null,
     unassigned: true, unassignedReason: null,
     canonicalConsortium: null, canonicalProvider: null, canonicalProviderTaxId: null,
-    providerPaymentAlias: null,
+    providerPaymentAlias: null, consortiumBank: null,
   };
 
   const prisma = getPrismaClient();
 
   // ── 0. LSP fast path: resolver proveedor por CUIT + LspService por clientNumber ──
 
-  const normalizedClientNumber = extracted.clientNumber?.replace(/^0+/, "") || null;
+  const normalizedClientNumber = extracted.clientNumber?.replace(/\s+/g, "").replace(/^0+/, "") || null;
   const allTaxIds = (extracted.allTaxIds ?? []).map((c) => normCuit(c)).filter((c) => c.length >= 10);
 
   // Resolver proveedor LSP por CUIT en tabla Provider
@@ -236,7 +238,7 @@ async function resolveAssignment(
       let lspService = lspProviderId
         ? await prisma.lspService.findFirst({
             where: { clientId, providerId: lspProviderId, clientNumber: normalizedClientNumber },
-            include: { consortium: { select: { id: true, canonicalName: true, rawName: true } } },
+            include: { consortium: { select: { id: true, canonicalName: true, rawName: true, bank: true } } },
           })
         : null;
 
@@ -244,7 +246,7 @@ async function resolveAssignment(
       if (!lspService) {
         lspService = await prisma.lspService.findFirst({
           where: { clientId, provider: lspProvider, clientNumber: normalizedClientNumber },
-          include: { consortium: { select: { id: true, canonicalName: true, rawName: true } } },
+          include: { consortium: { select: { id: true, canonicalName: true, rawName: true, bank: true } } },
         });
       }
 
@@ -273,10 +275,16 @@ async function resolveAssignment(
           canonicalProvider: lspProviderCanonical ?? LSP_FALLBACK_NAMES[lspProvider] ?? lspProvider,
           canonicalProviderTaxId: lspProviderTaxId ?? extracted.providerTaxId,
           providerPaymentAlias: lspProviderAlias,
+          consortiumBank: lspService.consortium.bank ?? null,
         };
       }
 
-      pipelineLog.stepStart(clientId, `LspService no encontrado: ${lspProvider} clientNumber=${normalizedClientNumber} → fallback a matching normal`);
+      pipelineLog.lspClientNumberNotRegistered(clientId, lspProvider, normalizedClientNumber);
+      return {
+        ...base,
+        unassigned: true,
+        unassignedReason: `LSP ${lspProvider} - Nro cliente ${normalizedClientNumber} no registrado en LspServices`,
+      };
     } catch (err) {
       pipelineLog.stepStart(clientId, `LspService lookup error: ${err instanceof Error ? err.message : "Unknown"} → fallback a matching normal`);
     }
@@ -369,6 +377,7 @@ async function resolveAssignment(
   base.periodId = activePeriod?.id;
   base.periodLabel = activePeriod ? formatPeriodLabel(activePeriod.month, activePeriod.year) : null;
   base.canonicalConsortium = consortium.rawName;
+  base.consortiumBank = consortium.bank ?? null;
 
   const consortiumCuitNorm = normCuit((consortium as any).cuit);
 
@@ -456,6 +465,7 @@ async function resolveAssignment(
     canonicalProvider: matched.canonicalName,
     canonicalProviderTaxId: matched.cuit ?? rawCuit,
     providerPaymentAlias: matched.paymentAlias ?? null,
+    consortiumBank: base.consortiumBank,
   };
 }
 
@@ -598,6 +608,7 @@ async function processDriveFile(
       extracted.alias = assignment.providerPaymentAlias || null;
       if (assignment.canonicalProviderTaxId) extracted.providerTaxId = assignment.canonicalProviderTaxId;
       extracted.period = assignment.periodLabel || null;
+      extracted.bank = assignment.consortiumBank;
       pipelineLog.canonized(cid, extracted.consortium ?? "?", extracted.provider ?? "?", extracted.providerTaxId ?? "?");
     }
 

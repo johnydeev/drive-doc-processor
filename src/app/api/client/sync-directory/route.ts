@@ -294,7 +294,7 @@ export async function POST(request: NextRequest) {
             consortiumId,
             provider: ls.provider,
             providerId,
-            clientNumber: ls.clientNumber.replace(/^0+/, "") || ls.clientNumber,
+            clientNumber: ls.clientNumber.replace(/\s+/g, "").replace(/^0+/, "") || ls.clientNumber,
             description: ls.description,
           });
         }

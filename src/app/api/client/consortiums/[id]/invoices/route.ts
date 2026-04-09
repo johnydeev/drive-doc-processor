@@ -23,6 +23,7 @@ const DEFAULT_MAPPING: SheetsRowMapping = {
   isDuplicate: "L",
   period: "M",
   paymentStatus: "N",
+  bank: "O",
 };
 
 const TIPO_GASTO_VALUES = ["ORDINARIO", "EXTRAORDINARIO", "PARTICULAR"] as const;
@@ -101,7 +102,7 @@ export async function POST(
 
     const consortium = await prisma.consortium.findFirst({
       where: { id: consortiumId, clientId: auth.session.clientId },
-      select: { id: true, rawName: true },
+      select: { id: true, rawName: true, bank: true },
     });
     if (!consortium) {
       return NextResponse.json({ ok: false, error: "Consorcio no encontrado" }, { status: 404 });
@@ -200,6 +201,7 @@ export async function POST(
             sourceFileUrl: null,
             isDuplicate:   "NO",
             paymentStatus: "Sin pagar",
+            bank: consortium.bank ?? null,
           };
           await sheetsService.insertRow(sheetName, sheetData, mapping);
         }

@@ -19,6 +19,7 @@ export interface SheetsRowMapping {
   isDuplicate: string;
   period: string;
   paymentStatus: string;
+  bank: string;
 }
 
 export interface InsertRowResult {
@@ -41,6 +42,7 @@ const HEADER_BY_FIELD: Record<keyof SheetsRowMapping, string> = {
   isDuplicate: "ES_DUPLICADO",
   period: "PERIODO",
   paymentStatus: "ESTADO PAGO",
+  bank: "BANCO",
 };
 
 /**

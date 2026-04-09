@@ -15,4 +15,5 @@
   sourceFileUrl?: string | null;
   isDuplicate?: "YES" | "NO" | null;
   paymentStatus?: string | null;
+  bank?: string | null;
 }

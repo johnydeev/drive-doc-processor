@@ -18,6 +18,11 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
 
   # ── Scheduler: escanea Drive y crea ProcessingJobs ─────────────
   scheduler:
@@ -30,6 +35,11 @@ services:
     depends_on:
       web:
         condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
 
   # ── Worker: procesa la cola de jobs ────────────────────────────
   worker:
@@ -42,6 +52,11 @@ services:
     depends_on:
       web:
         condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
 
 # ── Cloudflare Tunnel ──────────────────────────────────────────
   tunnel:

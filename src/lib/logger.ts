@@ -245,6 +245,10 @@ export const pipelineLog = {
     log("warn", "job", `  LSP Proveedor "${lspType}" no encontrado en tabla Provider — usando nombre del router como fallback`, shortId(clientId));
   },
 
+  lspClientNumberNotRegistered(clientId: string, provider: string, clientNumber: string | null) {
+    log("warn", "job", `  ⚠️  [LSP] Nro cliente "${clientNumber}" de ${provider} no registrado en LspServices — moviendo a Sin Asignar`, shortId(clientId));
+  },
+
   // Canonization
   canonized(clientId: string, consortium: string, provider: string, taxId: string) {
     log("info", "job", `  Canonizado → consorcio="${consortium}" proveedor="${provider}" CUIT="${taxId}"`, shortId(clientId));

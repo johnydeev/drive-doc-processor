@@ -30,6 +30,22 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 - Scheduler + Worker como procesos separados
 - Sincronización directorio ALTA (Sheets → DB) con 4 hojas
 - Panel admin con métricas, alta de clientes, edición de configuración
+- **Fix normalización clientNumber LSP** (09/04/2026)
+  - Extendida normalización para eliminar espacios internos además de ceros a la izquierda
+  - Afecta: pipeline lookup, sync-directory, endpoint UI de LspServices
+  - Antes: "8 620 004 726" no matcheaba con "8620004726" → lspServiceId quedaba NULL
+- **Logging persistente en Docker** (09/04/2026)
+  - Configuración json-file con rotación (50MB x 10 archivos por servicio)
+  - Script `export-logs.ps1` para exportar logs a `/logs/` con fecha
+  - Carpeta `/logs/` excluida de git
+- **Bloqueo LSP sin clientNumber registrado** (09/04/2026)
+  - Si una boleta LSP llega con un clientNumber que no existe en LspService → Sin Asignar
+  - Nuevo log: `lspClientNumberNotRegistered` con provider y clientNumber
+  - Antes: la boleta se procesaba igual sin lspServiceId
+- **Rename banco→bank, claveSuterh→suterhKey en Consortium** (09/04/2026)
+  - Convención establecida: todos los campos nuevos en camelCase inglés
+  - Migración con expand-contract: add new → copy data → drop old
+  - Migración: `20260409000100_rename_consortium_banco_suterh`
 - Campo `aliases` en Consortium (migración aplicada)
 - Tablas Rubro y Coeficiente a nivel cliente (migración aplicada)
 - Regla de documentación obligatoria en `docs/` establecida (21/03/2026)
@@ -38,6 +54,7 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 - **ESLint configurado** — typescript-eslint + @next/eslint-plugin-next (21/03/2026)
 - **Cloudflare Tunnel** integrado en docker-compose (21/03/2026)
 - **Fixes de build**: encoding UTF-8 en close-period/route.ts, async params en receipt/route.ts, clientAuth.ts creado, type cast en scan/route.ts (21/03/2026)
+- **Campos banco y claveSuterh en Consortium** (07/04/2026) — Nuevos campos nullable: `banco` y `claveSuterh`. `banco` incluido como columna O en Google Sheets con header "BANCO". `claveSuterh` solo en DB, sin UI por ahora. Migración: `20260407000100_add_consortium_banco_suterh`
 - **Columna ESTADO PAGO en Google Sheets** (07/04/2026) — Nuevo campo `paymentStatus` en `SheetsRowMapping`, `HEADER_BY_FIELD`, `DEFAULT_MAPPING` y `ExtractedDocumentData`. Columna N en Sheets con header "ESTADO PAGO". Valor inicial "Sin pagar" al procesar/cargar boleta. Actualización retroactiva de pagos existentes: pendiente (mejora futura)
 - **Auditoría de producción Docker** — revisión completa de dependencias, env vars, migraciones y Docker setup (23/03/2026)
   - TypeScript compila sin errores, ESLint solo 8 warnings menores (variables no usadas)

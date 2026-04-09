@@ -283,6 +283,8 @@ model Consortium {
   matchNames             String?
   /// Alias visible en la UI y en la columna "ALIAS" de Google Sheets.
   paymentAlias           String?
+  bank                   String?
+  suterhKey              String?
   createdAt              DateTime             @default(now())
   updatedAt              DateTime             @updatedAt
   client                 Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)

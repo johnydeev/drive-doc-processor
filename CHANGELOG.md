@@ -1,9 +1,24 @@
 # Changelog
 
+## [Unreleased] - 2026-04-09
+
+### Added
+- Script `export-logs.ps1` para exportar logs de Docker a archivos locales con fecha
+- Configuración de rotación de logs en docker-compose.yml (json-file, 50MB x 10)
+
+### Changed
+- Fix clientNumber LSP: normalización extendida elimina espacios internos antes del lookup (resuelve lspServiceId NULL en facturas Edenor y similares)
+- Boletas LSP con clientNumber no registrado en LspService ahora van a Sin Asignar en lugar de procesarse sin vínculo
+- Rename `Consortium.banco` → `bank`, `claveSuterh` → `suterhKey` (convención camelCase inglés)
+
+---
+
 ## [Unreleased] - 2026-04-07
 
 ### Added
 - Columna "ESTADO PAGO" en Google Sheets (columna N), valor inicial "Sin pagar" al insertar boleta
+- Campos `banco` y `claveSuterh` en modelo Consortium
+- Columna "BANCO" en Google Sheets (columna O)
 
 ---
 
