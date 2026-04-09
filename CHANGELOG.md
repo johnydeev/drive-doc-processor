@@ -6,6 +6,11 @@
 - Script `export-logs.ps1` para exportar logs de Docker a archivos locales con fecha
 - Configuración de rotación de logs en docker-compose.yml (json-file, 50MB x 10)
 
+### Fixed
+- Fix sync-directory: providerId se resuelve automáticamente al sincronizar LspServices (campo providerName texto se mantiene, providerId es complementario)
+- Rename `LspService.provider` → `providerName` (claridad vs providerId FK)
+- Fix LSP lookup: mapa router→canonicalName resuelve mismatch PERSONAL/TELECOM ARGENTINA S.A.
+
 ### Changed
 - Fix clientNumber LSP: normalización extendida elimina espacios internos antes del lookup (resuelve lspServiceId NULL en facturas Edenor y similares)
 - Boletas LSP con clientNumber no registrado en LspService ahora van a Sin Asignar en lugar de procesarse sin vínculo

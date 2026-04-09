@@ -99,7 +99,7 @@ const EMPTY_INVOICE_FORM: InvoiceForm = {
 };
 
 type LspService = {
-  id: string; provider: string; clientNumber: string; description: string | null;
+  id: string; providerName: string; clientNumber: string; description: string | null;
 };
 
 const LSP_PROVIDERS = [
@@ -927,7 +927,7 @@ export default function ConsortiumsPage() {
                       <tbody>
                         {lspServices.map((s) => (
                           <tr key={s.id}>
-                            <td>{LSP_PROVIDERS.find((p) => p.value === s.provider)?.label ?? s.provider}</td>
+                            <td>{LSP_PROVIDERS.find((p) => p.value === s.providerName)?.label ?? s.providerName}</td>
                             <td className={styles.tdMono}>{s.clientNumber}</td>
                             <td>{s.description ?? "—"}</td>
                             <td>

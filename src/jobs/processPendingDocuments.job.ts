@@ -94,6 +94,18 @@ function createBaseSummary(totalFound: number): ProcessJobSummary {
   };
 }
 
+/** Traduce el nombre corto del router LSP al nombre canónico (razón social) en DB */
+const LSP_ROUTER_TO_CANONICAL: Record<string, string> = {
+  "PERSONAL":    "TELECOM ARGENTINA S.A.",
+  "EDESUR":      "EDESUR S.A.",
+  "EDENOR":      "EDENOR S.A.",
+  "AYSA":        "AYSA S.A.",
+  "METROGAS":    "METROGAS S.A.",
+  "NATURGY":     "NATURGY S.A.",
+  "CAMUZZI":     "CAMUZZI GAS PAMPEANA S.A.",
+  "LITORAL_GAS": "LITORAL GAS S.A.",
+};
+
 function buildDriveFileUrl(fileId: string, webViewLink?: string | null): string {
   return webViewLink?.trim() || `https://drive.google.com/file/d/${fileId}/view`;
 }
@@ -232,6 +244,9 @@ async function resolveAssignment(
     }
   }
 
+  // Traducir nombre del router al nombre canónico en DB
+  const lspProviderCanonicalName = lspProvider ? (LSP_ROUTER_TO_CANONICAL[lspProvider] ?? lspProvider) : null;
+
   if (lspProvider && lspProvider !== "GENERIC_LSP" && normalizedClientNumber) {
     try {
       // Intento 1: buscar por providerId (FK) si lo tenemos
@@ -242,10 +257,10 @@ async function resolveAssignment(
           })
         : null;
 
-      // Intento 2: fallback a campo texto provider (backward compatible)
+      // Intento 2: fallback a campo texto providerName (nombre canónico)
       if (!lspService) {
         lspService = await prisma.lspService.findFirst({
-          where: { clientId, provider: lspProvider, clientNumber: normalizedClientNumber },
+          where: { clientId, providerName: lspProviderCanonicalName!, clientNumber: normalizedClientNumber },
           include: { consortium: { select: { id: true, canonicalName: true, rawName: true, bank: true } } },
         });
       }
@@ -279,11 +294,11 @@ async function resolveAssignment(
         };
       }
 
-      pipelineLog.lspClientNumberNotRegistered(clientId, lspProvider, normalizedClientNumber);
+      pipelineLog.lspClientNumberNotRegistered(clientId, lspProviderCanonicalName!, normalizedClientNumber);
       return {
         ...base,
         unassigned: true,
-        unassignedReason: `LSP ${lspProvider} - Nro cliente ${normalizedClientNumber} no registrado en LspServices`,
+        unassignedReason: `LSP ${lspProviderCanonicalName} - Nro cliente ${normalizedClientNumber} no registrado en LspServices`,
       };
     } catch (err) {
       pipelineLog.stepStart(clientId, `LspService lookup error: ${err instanceof Error ? err.message : "Unknown"} → fallback a matching normal`);

@@ -4,6 +4,48 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-09 — Mapa router→canonicalName para LspService lookup
+
+### Problema
+El router `identifyLSPProvider()` usa nombres cortos ("PERSONAL", "EDESUR") mientras que en LspService los proveedores se cargan con razón social completa ("TELECOM ARGENTINA S.A.", "EDESUR S.A."). El lookup por `providerName` fallaba silenciosamente.
+
+### Decisión
+Constante `LSP_ROUTER_TO_CANONICAL` que mapea cada nombre del router a su razón social canónica. Se aplica antes del fallback lookup por nombre en LspService. El lookup por `providerId` (FK) no cambia — es más robusto y no necesita el mapa.
+
+### Impacto
+- Modificado: `processPendingDocuments.job.ts`
+- Sin cambios de schema ni migraciones
+
+---
+
+## 2026-04-09 — Rename LspService.provider → providerName
+
+### Problema
+El campo `provider` en LspService era ambiguo — mismo nombre que la tabla Provider. Con la adición de `providerId` como FK, tener `provider` (texto) y `providerId` (FK) era confuso. `providerName` clarifica que es el nombre en texto.
+
+### Decisión
+Rename provider→providerName. Expand-contract para zero-downtime. La tabla Provider no se toca — es un rename de columna solamente.
+
+### Impacto
+- Migración: `20260409000200_rename_lspservice_provider`
+- Modificados: schema.prisma, processPendingDocuments.job.ts, sync-directory/route.ts, lsp-services/route.ts, consortiums/page.tsx
+
+---
+
+## 2026-04-09 — Fix resolución providerId en sync-directory LspServices
+
+### Problema
+Al sincronizar la hoja _LspServices desde el archivo ALTA, el campo providerId quedaba NULL aunque el proveedor existiera en la tabla Provider con el mismo canonicalName. No había warning visible cuando el match fallaba.
+
+### Decisión
+Mantener ambos campos en LspService: provider (texto, para el pipeline) y providerId (FK, para integridad referencial). Agregar warning cuando providerId no se resuelve. Incluir paso retroactivo al final del bloque que resuelve providerId NULL en registros históricos en cada sync.
+
+### Impacto
+- Modificado: src/app/api/client/sync-directory/route.ts
+- Sin cambios de schema ni migraciones
+
+---
+
 ## 2026-04-09 — Fix normalización clientNumber con espacios internos
 
 ### Problema

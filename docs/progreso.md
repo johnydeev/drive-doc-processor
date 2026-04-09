@@ -30,6 +30,19 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 - Scheduler + Worker como procesos separados
 - Sincronización directorio ALTA (Sheets → DB) con 4 hojas
 - Panel admin con métricas, alta de clientes, edición de configuración
+- **Mapa router→canonicalName para lookup LspService** (09/04/2026)
+  - `LSP_ROUTER_TO_CANONICAL` traduce "PERSONAL"→"TELECOM ARGENTINA S.A.", etc.
+  - El lookup de LspService ahora usa el nombre canónico de DB en lugar del nombre del router
+  - Antes: providerName="PERSONAL" no matcheaba con providerName="TELECOM ARGENTINA S.A."
+- **Rename LspService.provider → providerName** (09/04/2026)
+  - Convención camelCase inglés + mayor claridad (providerName vs providerId)
+  - Migración expand-contract: add → copy → drop
+  - Migración: `20260409000200_rename_lspservice_provider`
+- **Fix providerId en LspService al sincronizar directorio** (09/04/2026)
+  - sync-directory ahora resuelve y guarda providerId al crear/actualizar LspServices
+  - Campo providerName (texto) se mantiene — providerId es complementario
+  - Paso retroactivo: resuelve providerId NULL en registros históricos en cada sync
+  - Antes: providerId quedaba NULL aunque el Provider existiera en DB
 - **Fix normalización clientNumber LSP** (09/04/2026)
   - Extendida normalización para eliminar espacios internos además de ceros a la izquierda
   - Afecta: pipeline lookup, sync-directory, endpoint UI de LspServices

@@ -356,7 +356,7 @@ model LspService {
   id            String     @id @default(cuid())
   clientId      String
   consortiumId  String
-  provider      String
+  providerName  String
   providerId    String?
   clientNumber  String
   description   String?
@@ -367,8 +367,8 @@ model LspService {
   providerRef   Provider?  @relation(fields: [providerId], references: [id], onDelete: SetNull)
   invoices      Invoice[]
 
-  @@unique([consortiumId, provider, clientNumber])
-  @@index([clientId, provider, clientNumber])
+  @@unique([consortiumId, providerName, clientNumber])
+  @@index([clientId, providerName, clientNumber])
 }
 
 model Payment {

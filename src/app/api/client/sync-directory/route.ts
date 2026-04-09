@@ -274,7 +274,7 @@ export async function POST(request: NextRequest) {
         const validLspServices: Array<{
           clientId: string;
           consortiumId: string;
-          provider: string;
+          providerName: string;
           providerId: string | null;
           clientNumber: string;
           description: string | null;
@@ -289,10 +289,13 @@ export async function POST(request: NextRequest) {
             continue;
           }
           const providerId = providerMap.get(ls.provider.toUpperCase()) ?? null;
+          if (!providerId) {
+            console.warn(`[sync-directory] Provider no encontrado para LspService: ${ls.provider}`);
+          }
           validLspServices.push({
             clientId,
             consortiumId,
-            provider: ls.provider,
+            providerName: ls.provider,
             providerId,
             clientNumber: ls.clientNumber.replace(/\s+/g, "").replace(/^0+/, "") || ls.clientNumber,
             description: ls.description,
@@ -307,6 +310,33 @@ export async function POST(request: NextRequest) {
       }
     }, txOpts);
     console.log(`[sync-directory] ✓ LspServices completado (${Date.now() - t5}ms)`);
+
+    // Resolver providerId NULL en registros históricos
+    const pendingLsp = await prisma.lspService.findMany({
+      where: { clientId, providerId: null },
+      select: { id: true, providerName: true },
+    });
+
+    if (pendingLsp.length > 0) {
+      console.log(`[sync-directory] → Resolviendo providerId NULL en ${pendingLsp.length} LspService(s) históricos...`);
+      let resolved = 0;
+      for (const lsp of pendingLsp) {
+        const p = await prisma.provider.findFirst({
+          where: { clientId, canonicalName: lsp.providerName },
+          select: { id: true },
+        });
+        if (p) {
+          await prisma.lspService.update({
+            where: { id: lsp.id },
+            data: { providerId: p.id },
+          });
+          resolved++;
+        }
+      }
+      if (resolved > 0) {
+        console.log(`[sync-directory] ✓ Resueltos ${resolved}/${pendingLsp.length} providerId históricos`);
+      }
+    }
 
     // Guardar fecha de última sincronización
     await prisma.schedulerState.upsert({
