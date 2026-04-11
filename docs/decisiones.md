@@ -4,6 +4,48 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-09 — Lock de archivo vía carpeta Procesando en Drive
+
+### Problema
+Race condition entre ciclos concurrentes: un run manual y el scheduler podían empezar al mismo tiempo, listar Pendientes, y tomar el mismo PDF antes de que el primero lo moviera a Escaneados. Resultado: doble procesamiento, doble inserción en Sheets (con la dedup por hash/business key como único colchón — no siempre suficiente si el segundo ciclo llega antes de guardar el Invoice).
+
+### Decisión
+Usar una carpeta intermedia "Procesando" como lock atómico a nivel Drive:
+
+1. Nuevo campo opcional `processing` en `driveFoldersJson` (sin migración — el JSON es flexible).
+2. Tras descargar el PDF, el pipeline lo mueve inmediatamente a `processing` con `moveFileToFolder`. La operación de Drive es atómica: si dos ciclos intentan moverlo, solo uno gana.
+3. Los movimientos finales (Escaneados / Sin Asignar / Fallidos) usan `processingFolderId ?? drivePendingFolderId` como carpeta origen. Cuando el lock está activo, vienen desde Procesando; si no hay lock configurado, cae al comportamiento legacy desde Pendientes.
+4. El move al lock está en try/catch: si falla (permisos, carpeta inexistente), se loguea warning y el procesamiento continúa desde Pendientes. Esto hace el feature opt-in y no bloqueante para clientes existentes.
+
+### Alternativas descartadas
+- **Lock en DB (flag `processing` en un registro)**: requiere migración, agrega dependencia transaccional y no protege contra crashes del worker (lock huérfano).
+- **Lista de IDs in-memory en cada ciclo**: no protege contra múltiples procesos (scheduler + worker son containers separados).
+- **Advisory lock de PostgreSQL**: añade acoplamiento y no es visible desde Drive (más difícil de diagnosticar).
+
+### Impacto
+- Modificado: `src/types/client.types.ts` — campo `processing?: string | null` en `ClientDriveFolders`
+- Modificado: `src/lib/clientProcessingConfig.ts` — `ResolvedFolders.processing` + `resolveFolders()`
+- Modificado: `src/jobs/processPendingDocuments.job.ts` — `ProcessJobConfig.driveProcessingFolderId`, move al lock post-download, origen de movimientos finales
+- Modificado: `src/jobs/runProcessingCycle.ts` y `src/jobs/jobWorkerMain.ts` — pasan `folders.processing` al config
+- Sin cambios de schema ni migraciones
+- Opt-in: clientes existentes siguen funcionando sin configurar `processing`
+
+---
+
+## 2026-04-09 — Fix providerId/providerTaxId en LSP fast path
+
+### Problema
+El LSP fast path resolvía correctamente consortiumId y lspServiceId pero no asignaba providerId ni providerTaxId al Invoice. Quedaban NULL aunque el LspService ya tuviera su FK a Provider resuelta.
+
+### Decisión
+En el fast path, después de encontrar el LspService, incluir `providerRef` en el query para obtener id, cuit y paymentAlias del Provider. Usar cascada: primero el CUIT lookup (ya existente), luego la FK del LspService como fallback. Sin campos nuevos en AssignmentResult — el campo `providerId` existente ya servía, solo no se estaba poblando correctamente.
+
+### Impacto
+- Modificado: `processPendingDocuments.job.ts`
+- Sin cambios de schema ni migraciones
+
+---
+
 ## 2026-04-09 — Mapa router→canonicalName para LspService lookup
 
 ### Problema

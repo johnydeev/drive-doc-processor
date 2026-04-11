@@ -83,6 +83,7 @@ export async function runProcessingCycle(
           driveScannedFolderId: folders.scanned,
           driveUnassignedFolderId: folders.unassigned,
           driveFailedFolderId: folders.failed,
+          driveProcessingFolderId: folders.processing,
           googleConfig,
           aiConfig: resolveAiConfig(client),
         });

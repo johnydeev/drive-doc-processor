@@ -55,7 +55,9 @@ export async function POST(request: NextRequest) {
 
     const syncedAt = new Date();
 
-    const txOpts = { maxWait: 10000, timeout: 30000 };
+    // timeout: 120s para evitar "Transaction already closed" con lotes grandes
+    // de proveedores/consorcios (50+ registros con updates en paralelo).
+    const txOpts = { maxWait: 10000, timeout: 120000 };
 
     // Transacción 1: Rubros (reemplazo total)
     const t1 = Date.now();

@@ -102,6 +102,7 @@ export interface ResolvedFolders {
   unassigned: string | null;
   failed: string | null;
   receipts: string | null;
+  processing: string | null;
 }
 
 export function resolveFolders(client: ProcessingClient): ResolvedFolders {
@@ -113,6 +114,7 @@ export function resolveFolders(client: ProcessingClient): ResolvedFolders {
     unassigned: f?.unassigned?.trim() || null,
     failed:     f?.failed?.trim()     || null,
     receipts:   f?.receipts?.trim()   || null,
+    processing: f?.processing?.trim() || null,
   };
 }
 

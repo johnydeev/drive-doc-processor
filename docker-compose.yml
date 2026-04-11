@@ -10,6 +10,8 @@ services:
     environment:
       NODE_ENV: production
       HOSTNAME: "0.0.0.0"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
     ports:
       - "3000:3000"
     healthcheck:
@@ -31,6 +33,8 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
     command: ["node", "dist/jobs/scheduler.js"]
     depends_on:
       web:
@@ -48,6 +52,8 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
     command: ["node", "dist/jobs/jobWorkerMain.js"]
     depends_on:
       web:

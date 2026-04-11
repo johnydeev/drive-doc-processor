@@ -172,6 +172,7 @@ async function handleJob(job: {
         driveScannedFolderId: folders.scanned,
         driveUnassignedFolderId: folders.unassigned,
         driveFailedFolderId: folders.failed,
+        driveProcessingFolderId: folders.processing,
         googleConfig,
         aiConfig: resolveAiConfig(client),
       },

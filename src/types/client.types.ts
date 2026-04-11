@@ -22,6 +22,7 @@ export interface ClientDriveFolders {
   unassigned?: string | null;
   failed?: string | null;
   receipts?: string | null;
+  processing?: string | null;
 }
 
 export interface ProcessingClient {

@@ -25,6 +25,7 @@ export interface ProcessJobConfig {
   driveScannedFolderId?: string;
   driveUnassignedFolderId?: string | null;
   driveFailedFolderId?: string | null;
+  driveProcessingFolderId?: string | null;
   googleConfig?: ClientGoogleConfig | null;
   aiConfig?: {
     geminiApiKey?: string;
@@ -249,11 +250,16 @@ async function resolveAssignment(
 
   if (lspProvider && lspProvider !== "GENERIC_LSP" && normalizedClientNumber) {
     try {
+      const lspInclude = {
+        consortium: { select: { id: true, canonicalName: true, rawName: true, bank: true } },
+        providerRef: { select: { id: true, canonicalName: true, cuit: true, paymentAlias: true } },
+      } as const;
+
       // Intento 1: buscar por providerId (FK) si lo tenemos
       let lspService = lspProviderId
         ? await prisma.lspService.findFirst({
             where: { clientId, providerId: lspProviderId, clientNumber: normalizedClientNumber },
-            include: { consortium: { select: { id: true, canonicalName: true, rawName: true, bank: true } } },
+            include: lspInclude,
           })
         : null;
 
@@ -261,7 +267,7 @@ async function resolveAssignment(
       if (!lspService) {
         lspService = await prisma.lspService.findFirst({
           where: { clientId, providerName: lspProviderCanonicalName!, clientNumber: normalizedClientNumber },
-          include: { consortium: { select: { id: true, canonicalName: true, rawName: true, bank: true } } },
+          include: lspInclude,
         });
       }
 
@@ -276,20 +282,25 @@ async function resolveAssignment(
           }).catch(() => { /* non-fatal */ });
         }
 
+        // Resolver proveedor: preferir CUIT lookup, luego FK del LspService
+        const resolvedProvider = lspProviderId
+          ? { id: lspProviderId, canonicalName: lspProviderCanonical, cuit: lspProviderTaxId, paymentAlias: lspProviderAlias }
+          : lspService.providerRef;
+
         const activePeriod = await consortiumRepository.findActivePeriod(lspService.consortiumId);
 
         return {
           consortiumId: lspService.consortiumId,
-          providerId: lspProviderId ?? undefined,
+          providerId: resolvedProvider?.id ?? undefined,
           periodId: activePeriod?.id,
           periodLabel: activePeriod ? formatPeriodLabel(activePeriod.month, activePeriod.year) : null,
           lspServiceId: lspService.id,
           unassigned: false,
           unassignedReason: null,
           canonicalConsortium: lspService.consortium.rawName,
-          canonicalProvider: lspProviderCanonical ?? LSP_FALLBACK_NAMES[lspProvider] ?? lspProvider,
-          canonicalProviderTaxId: lspProviderTaxId ?? extracted.providerTaxId,
-          providerPaymentAlias: lspProviderAlias,
+          canonicalProvider: resolvedProvider?.canonicalName ?? LSP_FALLBACK_NAMES[lspProvider] ?? lspProvider,
+          canonicalProviderTaxId: resolvedProvider?.cuit ?? extracted.providerTaxId,
+          providerPaymentAlias: resolvedProvider?.paymentAlias ?? null,
           consortiumBank: lspService.consortium.bank ?? null,
         };
       }
@@ -510,6 +521,23 @@ async function processDriveFile(
     const sourceFileUrl = buildDriveFileUrl(file.id, file.webViewLink);
     const buffer = await runStep("Descarga de Drive", () => driveService.downloadFile(file.id));
 
+    // ── Lock de archivo: mover a carpeta Procesando para evitar que otro ciclo
+    // concurrente lo reprocese mientras estamos trabajando en él.
+    const processingFolderId = resolvedConfig.driveProcessingFolderId ?? null;
+    if (processingFolderId && resolvedConfig.drivePendingFolderId) {
+      try {
+        await driveService.moveFileToFolder(file.id, resolvedConfig.drivePendingFolderId, processingFolderId);
+        pipelineLog.stepStart(cid, `→ Lock: movido a Procesando`);
+      } catch (lockError) {
+        const msg = lockError instanceof Error ? lockError.message : "Unknown error";
+        pipelineLog.stepStart(cid, `⚠️ No se pudo mover a Procesando: ${msg}`);
+      }
+    }
+
+    // Carpeta origen para los movimientos finales: si hay lock, venimos de Procesando;
+    // si no, seguimos viniendo de Pendientes (comportamiento legacy).
+    const finalSourceFolderId = processingFolderId ?? resolvedConfig.drivePendingFolderId;
+
     const fileHash = invoiceRepository.computeDocumentHash(buffer);
     const existingByHash = await runStep("Verificación duplicado por hash", () =>
       invoiceRepository.findDuplicateByHash(cid, fileHash)
@@ -631,9 +659,9 @@ async function processDriveFile(
 
     if (assignment.unassigned) {
       pipelineLog.movedToUnassigned(cid, file.id, assignment.unassignedReason ?? "razón desconocida");
-      if (resolvedConfig.driveUnassignedFolderId && resolvedConfig.drivePendingFolderId) {
+      if (resolvedConfig.driveUnassignedFolderId && finalSourceFolderId) {
         await runStep("Mover a Sin Asignar", () =>
-          driveService.moveFileToUnassigned(file.id, resolvedConfig.drivePendingFolderId!, resolvedConfig.driveUnassignedFolderId!)
+          driveService.moveFileToUnassigned(file.id, finalSourceFolderId, resolvedConfig.driveUnassignedFolderId!)
         );
       }
       summary.unassigned += 1;
@@ -647,7 +675,7 @@ async function processDriveFile(
     pipelineLog.sheetsInserted(cid);
 
     await runStep("Mover a Escaneados", () =>
-      driveService.moveFileToScanned(file.id, resolvedConfig.drivePendingFolderId, resolvedConfig.driveScannedFolderId)
+      driveService.moveFileToScanned(file.id, finalSourceFolderId, resolvedConfig.driveScannedFolderId)
     );
     pipelineLog.movedToScanned(cid, file.id);
 
@@ -676,9 +704,12 @@ async function processDriveFile(
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     summary.errors.push({ fileId: file.id, fileName: file.name, error: errorMessage });
     pipelineLog.fileFailed(cid, file.name, errorMessage);
-    if (resolvedConfig.driveFailedFolderId && resolvedConfig.drivePendingFolderId) {
+    // Para el catch, intentamos usar Procesando primero (si existe) y caer a Pendientes.
+    const failSourceFolderId =
+      resolvedConfig.driveProcessingFolderId ?? resolvedConfig.drivePendingFolderId;
+    if (resolvedConfig.driveFailedFolderId && failSourceFolderId) {
       try {
-        await driveService.moveFileToFailed(file.id, resolvedConfig.drivePendingFolderId, resolvedConfig.driveFailedFolderId);
+        await driveService.moveFileToFailed(file.id, failSourceFolderId, resolvedConfig.driveFailedFolderId);
         pipelineLog.movedToFailed(cid, file.id);
       } catch {
         // Silent — ya logueamos el error principal
@@ -692,7 +723,7 @@ function buildLegacyConfig(sheetName: string, mapping?: SheetsRowMapping): Proce
     clientId: "default-env-client", clientName: "Default Client", sheetName, mapping,
     drivePendingFolderId: env.GOOGLE_DRIVE_PENDING_FOLDER_ID,
     driveScannedFolderId: env.GOOGLE_DRIVE_SCANNED_FOLDER_ID,
-    driveUnassignedFolderId: null, driveFailedFolderId: null, googleConfig: null,
+    driveUnassignedFolderId: null, driveFailedFolderId: null, driveProcessingFolderId: null, googleConfig: null,
   };
 }
 
@@ -704,6 +735,7 @@ function normalizeConfig(config: ProcessJobConfig | string, mapping?: SheetsRowM
     driveScannedFolderId: config.driveScannedFolderId ?? env.GOOGLE_DRIVE_SCANNED_FOLDER_ID,
     driveUnassignedFolderId: config.driveUnassignedFolderId ?? null,
     driveFailedFolderId: config.driveFailedFolderId ?? null,
+    driveProcessingFolderId: config.driveProcessingFolderId ?? null,
   };
 }
 

@@ -5,11 +5,15 @@
 ### Added
 - Script `export-logs.ps1` para exportar logs de Docker a archivos locales con fecha
 - Configuración de rotación de logs en docker-compose.yml (json-file, 50MB x 10)
+- Lock de archivo vía carpeta "Procesando" en Drive: tras descargar, el pipeline mueve el archivo a la carpeta `processing` configurada en `driveFoldersJson.processing` (opcional). Si otro ciclo concurrente escanea Pendientes no lo vuelve a tomar. Los movimientos finales (Escaneados / Sin Asignar / Fallidos) usan Procesando como origen cuando el lock está activo.
 
 ### Fixed
 - Fix sync-directory: providerId se resuelve automáticamente al sincronizar LspServices (campo providerName texto se mantiene, providerId es complementario)
 - Rename `LspService.provider` → `providerName` (claridad vs providerId FK)
 - Fix LSP lookup: mapa router→canonicalName resuelve mismatch PERSONAL/TELECOM ARGENTINA S.A.
+- Fix LSP fast path: providerId y providerTaxId ahora se asignan correctamente en Invoices de boletas LSP
+- Fix race condition entre ciclos concurrentes (manual + scheduler) que causaba doble procesamiento del mismo archivo
+- Fix sync-directory: timeout de transacción Prisma aumentado a 120s para evitar expiración con lotes grandes de proveedores/consorcios
 
 ### Changed
 - Fix clientNumber LSP: normalización extendida elimina espacios internos antes del lookup (resuelve lspServiceId NULL en facturas Edenor y similares)

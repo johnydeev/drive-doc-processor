@@ -12,6 +12,12 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 
 ## Completado ✅
 
+- **Lock de archivo vía carpeta Procesando** (09/04/2026)
+  - Nuevo campo opcional `processing` en `driveFoldersJson`
+  - Tras descargar el PDF, el pipeline lo mueve a la carpeta Procesando como lock atómico a nivel Drive
+  - Los movimientos finales (Escaneados / Sin Asignar / Fallidos) usan Procesando como origen cuando el lock está activo
+  - Soluciona race condition: manual + scheduler tomando el mismo archivo de Pendientes
+  - Sin migración: solo requiere agregar el ID de carpeta en `driveFoldersJson.processing` del cliente
 - Pipeline de procesamiento de PDFs (download → dedup → extracción → match → Sheets → mover)
 - Extracción IA con Gemini + fallback OpenAI
 - **Prompts LSP por empresa** — `identifyLSPProvider()` como router con prompts para Edesur, Edenor, AySA, Metrogas, Naturgy, Camuzzi, Litoral Gas (21/03/2026)
@@ -30,6 +36,10 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 - Scheduler + Worker como procesos separados
 - Sincronización directorio ALTA (Sheets → DB) con 4 hojas
 - Panel admin con métricas, alta de clientes, edición de configuración
+- **Fix LSP fast path: asigna providerId y providerTaxId** (09/04/2026)
+  - Cuando el pipeline resuelve por LspService, ahora busca el Provider via LspService.providerId FK
+  - Asigna providerId y providerTaxId al Invoice correctamente
+  - Antes: ambos campos quedaban NULL en boletas LSP resueltas por fast path
 - **Mapa router→canonicalName para lookup LspService** (09/04/2026)
   - `LSP_ROUTER_TO_CANONICAL` traduce "PERSONAL"→"TELECOM ARGENTINA S.A.", etc.
   - El lookup de LspService ahora usa el nombre canónico de DB en lugar del nombre del router
