@@ -15,6 +15,7 @@ export async function GET(request: Request) {
         id: true,
         name: true,
         consortiumsEnabled: true,
+        extractionConfigJson: true,
         schedulerStates: {
           take: 1,
           select: {
@@ -61,6 +62,7 @@ export async function GET(request: Request) {
             openai: state?.quotaOpenAiStatus ?? "unknown",
           },
           consortiumCount: client._count.consortiums,
+          debugMode: !!(client.extractionConfigJson as Record<string, unknown> | null)?.debugMode,
         };
       }),
     });

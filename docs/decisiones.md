@@ -4,6 +4,53 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-14 — Fallback visual Gemini Vision para emisor en imagen
+
+### Problema
+Facturas generadas con GESTIONPRO tienen el bloque del emisor (nombre, CUIT) en imagen vectorial no seleccionable. pdf-parse y Tesseract no capturan ese texto. El pipeline terminaba en Sin Asignar aunque el consorcio sí matcheaba.
+
+### Decisión
+Agregar un paso de fallback visual como ÚLTIMA instancia antes de Sin Asignar. Condiciones estrictas para activarlo: proveedor no encontrado (unassigned=true), consorcio sí encontrado (consortiumId!=null), bloque emisor no detectado (hasEmitterBlock=false), PNG disponible del OCR, y geminiModule configurado. Gemini recibe el PNG y un prompt focalizado solo en identificar el emisor. Si retorna datos, se reintenta resolveAssignment. Si falla por cualquier razón, fallo silencioso y el flujo continúa normal.
+
+### Alternativas descartadas
+- **Siempre enviar imagen a Gemini**: desperdicio de tokens y latencia en facturas que ya se procesan bien con texto.
+- **OCR más agresivo (Tesseract con configuración especial)**: el bloque es una imagen vectorial embebida, Tesseract la captura parcialmente pero no de forma confiable.
+
+### Impacto
+- Modificado: `src/services/pdfTextExtractor.service.ts` — `getLastOcrPng()`, `getLastHasEmitterBlock()`
+- Modificado: `src/services/ocr.service.ts` — `getLastFirstPagePng()`
+- Modificado: `src/services/geminiExtractor.service.ts` — `extractProviderFromImage()`
+- Modificado: `src/jobs/processPendingDocuments.job.ts` — bloque fallback visual
+- Sin cambios de schema ni migraciones
+- Opt-in automático: solo se activa cuando las condiciones lo justifican
+
+---
+
+## 2026-04-13 — Modo Debug por cliente usando extractionConfigJson
+
+### Problema
+Diagnosticar problemas de extracción (OCR confuso, Gemini confundiendo emisor/receptor, etc.) requería agregar logs temporales al pipeline, deployar, y luego removerlos. Sin un mecanismo de debug on-demand, cada incidente requería un ciclo de deploy.
+
+### Decisión
+Agregar un flag `debugMode` dentro de `extractionConfigJson` (campo JSON flexible existente en Client). Cuando está activo, el pipeline logea:
+1. El texto completo post-OCR (después de la re-extracción de página 1 para LSPs)
+2. La respuesta raw de la extracción IA (Gemini/OpenAI)
+
+Se controla desde el panel admin con un toggle por cliente (botón en la tabla de métricas). El endpoint `PATCH /api/admin/clients/[id]/debug-mode` solo requiere rol ADMIN.
+
+### Alternativas descartadas
+- **Variable de entorno global**: afectaría todos los clientes, no se puede activar selectivamente.
+- **Campo dedicado en schema**: requiere migración innecesaria — el JSON flexible ya existe.
+
+### Impacto
+- Nuevo: `src/app/api/admin/clients/[id]/debug-mode/route.ts`
+- Modificado: `src/jobs/processPendingDocuments.job.ts` — campo `debugMode` en `ProcessJobConfig`, logs condicionales
+- Modificado: `src/jobs/runProcessingCycle.ts` y `src/jobs/jobWorkerMain.ts` — propagan `debugMode`
+- Modificado: `src/app/api/admin/audit/clients/route.ts` — incluye `debugMode` en respuesta
+- Modificado: `src/app/admin/page.tsx` — toggle en tabla de clientes
+
+---
+
 ## 2026-04-09 — Lock de archivo vía carpeta Procesando en Drive
 
 ### Problema

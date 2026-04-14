@@ -12,6 +12,16 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 
 ## Completado ✅
 
+- **Fallback visual Gemini Vision** (14/04/2026)
+  - Última instancia cuando proveedor no matchea y emisor está en imagen
+  - Gemini recibe el PNG de pdftoppm y extrae nombre y CUIT del emisor visualmente
+  - Fallo silencioso: si Vision falla el flujo continúa a Sin Asignar normalmente
+  - Condiciones: unassigned=true AND consortiumId!=null AND hasEmitterBlock=false AND PNG disponible
+- **Toggle Modo Debug por cliente** (13/04/2026)
+  - Botón en panel admin para activar/desactivar debug por cliente
+  - Cuando está activo, el pipeline logea texto completo post-OCR y respuesta raw de IA
+  - Usa `extractionConfigJson.debugMode` — sin migración
+  - Endpoint: `PATCH /api/admin/clients/[id]/debug-mode`
 - **Lock de archivo vía carpeta Procesando** (09/04/2026)
   - Nuevo campo opcional `processing` en `driveFoldersJson`
   - Tras descargar el PDF, el pipeline lo mueve a la carpeta Procesando como lock atómico a nivel Drive

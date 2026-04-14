@@ -127,4 +127,56 @@ export class GeminiExtractorService {
   getLastUsage(): AiUsageMetrics | null {
     return this.lastUsage;
   }
+
+  async extractProviderFromImage(
+    pngBuffer: Buffer,
+    consortiumName: string
+  ): Promise<{ providerName: string | null; providerTaxId: string | null }> {
+    const base64Image = pngBuffer.toString("base64");
+    const prompt = [
+      "Sos un asistente especializado en facturas argentinas.",
+      "En la imagen hay una factura. El consorcio receptor ya fue identificado",
+      `como "${consortiumName}".`,
+      "Tu única tarea es identificar al EMISOR de la factura (quien factura,",
+      "no quien recibe). Buscá en el bloque superior izquierdo o superior",
+      "derecho donde aparece la razón social y CUIT del emisor.",
+      "",
+      "Respondé SOLO con un JSON sin texto adicional:",
+      '{ "providerName": "RAZÓN SOCIAL DEL EMISOR o null", "providerTaxId": "XX-XXXXXXXX-X o null" }',
+      "",
+      "IMPORTANTE:",
+      "- providerTaxId debe ser el CUIT del EMISOR, no del receptor/consorcio.",
+      `- El CUIT del consorcio receptor es diferente — NO lo uses.`,
+      "- Si no podés identificar el emisor con certeza, devolvé null en ambos campos.",
+      "- No inventes datos.",
+    ].join("\n");
+
+    const contents = [{
+      role: "user" as const,
+      parts: [
+        { inlineData: { mimeType: "image/png" as const, data: base64Image } },
+        { text: prompt },
+      ],
+    }];
+
+    for (const modelName of this.buildModelCandidates()) {
+      try {
+        const model = this.getModel(modelName);
+        const response = await model.generateContent({
+          contents,
+          generationConfig: { temperature: 0, responseMimeType: "application/json" },
+        });
+        const outputText = response.response.text() || "{}";
+        const clean = outputText.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(clean) as { providerName?: string | null; providerTaxId?: string | null };
+        return {
+          providerName: parsed.providerName ?? null,
+          providerTaxId: parsed.providerTaxId ?? null,
+        };
+      } catch {
+        continue;
+      }
+    }
+    return { providerName: null, providerTaxId: null };
+  }
 }

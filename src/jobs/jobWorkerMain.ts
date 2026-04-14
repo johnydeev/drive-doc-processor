@@ -175,6 +175,7 @@ async function handleJob(job: {
         driveProcessingFolderId: folders.processing,
         googleConfig,
         aiConfig: resolveAiConfig(client),
+        debugMode: !!(client.extractionConfigJson as Record<string, unknown> | null)?.debugMode,
       },
       {
         id: job.driveFileId,

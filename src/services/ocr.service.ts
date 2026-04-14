@@ -12,7 +12,14 @@ export interface OcrOptions {
 const DEFAULT_LANGUAGE = "spa+eng";
 
 export class OcrService {
+  private lastFirstPagePng: Buffer | null = null;
+
+  getLastFirstPagePng(): Buffer | null {
+    return this.lastFirstPagePng;
+  }
+
   async extractTextFromPdf(buffer: Buffer, options?: OcrOptions): Promise<string> {
+    this.lastFirstPagePng = null;
     const language = options?.language ?? DEFAULT_LANGUAGE;
 
     // Crear directorio temporal único
@@ -38,6 +45,9 @@ export class OcrService {
         console.warn("[ocr-service] pdftoppm no generó imágenes");
         return "";
       }
+
+      // Cachear PNG de la primera página para posible uso en fallback visual
+      this.lastFirstPagePng = readFileSync(join(tmpDir, files[0]));
 
       console.log(`[ocr-service] pdftoppm generó ${files.length} página(s)`);
 

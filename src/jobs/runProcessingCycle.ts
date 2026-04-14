@@ -86,6 +86,7 @@ export async function runProcessingCycle(
           driveProcessingFolderId: folders.processing,
           googleConfig,
           aiConfig: resolveAiConfig(client),
+          debugMode: !!(client.extractionConfigJson as Record<string, unknown> | null)?.debugMode,
         });
 
         addSummary(aggregateSummary, clientSummary);

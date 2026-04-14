@@ -2,8 +2,20 @@ import { PDFParse } from "pdf-parse";
 
 export class PdfTextExtractorService {
   private static readonly MIN_USEFUL_CHARS = 100;
+  private lastOcrPngBuffer: Buffer | null = null;
+  private lastHasEmitterBlock = false;
+
+  getLastOcrPng(): Buffer | null {
+    return this.lastOcrPngBuffer;
+  }
+
+  getLastHasEmitterBlock(): boolean {
+    return this.lastHasEmitterBlock;
+  }
 
   async extractTextFromPdf(buffer: Buffer, maxPages?: number): Promise<string> {
+    this.lastOcrPngBuffer = null;
+    this.lastHasEmitterBlock = false;
     const directText = await this.extractTextDirectly(buffer, maxPages);
 
     const hasEnoughText = directText.length >= PdfTextExtractorService.MIN_USEFUL_CHARS;
@@ -18,6 +30,7 @@ export class PdfTextExtractorService {
       upperText.includes("RESPONSABLE INSCRIPTO") ||
       upperText.includes("MONOTRIBUTO")
     );
+    this.lastHasEmitterBlock = hasEmitterBlock;
 
     // DIAGNÓSTICO TEMPORAL — remover después
     console.log(`[pdf-extractor-debug] chars=${directText.length} hasEmitterBlock=${hasEmitterBlock}`);
@@ -36,6 +49,7 @@ export class PdfTextExtractorService {
       const { OcrService } = await import("@/services/ocr.service");
       const ocrService = new OcrService();
       const ocrText = await ocrService.extractTextFromPdf(buffer);
+      this.lastOcrPngBuffer = ocrService.getLastFirstPagePng();
       const cleanOcr = this.cleanText(ocrText);
 
       if (cleanOcr.length > directText.length) {

@@ -33,6 +33,7 @@ export interface ProcessJobConfig {
     openaiApiKey?: string;
     openaiModel?: string;
   } | null;
+  debugMode?: boolean;
 }
 
 export interface ProcessDriveFileInput {
@@ -572,6 +573,10 @@ async function processDriveFile(
         ? await runStep("Re-extracción página 1 (LSP)", () => pdfExtractor.extractTextFromPdf(buffer, 1))
         : fullText;
 
+      if (resolvedConfig.debugMode) {
+        pipelineLog.stepStart(cid, `[DEBUG-OCR] texto completo (${text.length} chars):\n${text}`);
+      }
+
       const providerErrors: string[] = [];
 
       if (geminiModule) {
@@ -605,6 +610,10 @@ async function processDriveFile(
       if (extracted === null) {
         pipelineLog.aiOcrFallback(cid);
         extracted = buildOcrOnlyPayload();
+      }
+
+      if (resolvedConfig.debugMode && extracted) {
+        pipelineLog.stepStart(cid, `[DEBUG-AI] respuesta raw: ${JSON.stringify(extracted)}`);
       }
     }
 
@@ -641,9 +650,69 @@ async function processDriveFile(
     extracted.isDuplicate = isDuplicate ? "YES" : "NO";
     extracted.paymentStatus = "Sin pagar";
 
-    const assignment = await resolveAssignment(
+    let assignment = await resolveAssignment(
       extracted, cid, file.id, consortiumRepository, providerRepository, lspProvider
     );
+
+    // ── Fallback visual: si el proveedor no fue encontrado y el emisor
+    // estaba en imagen, intentar extracción visual con Gemini ──────────────
+    if (
+      assignment.unassigned &&
+      assignment.consortiumId &&
+      !pdfExtractor.getLastHasEmitterBlock() &&
+      geminiModule &&
+      geminiApiKey
+    ) {
+      const pngBuffer = pdfExtractor.getLastOcrPng();
+      if (pngBuffer) {
+        try {
+          pipelineLog.stepStart(cid, "→ Fallback visual: extrayendo emisor con Gemini Vision...");
+          const visualExtractor = new geminiModule.GeminiExtractorService({
+            apiKey: geminiApiKey,
+            model: geminiModel,
+          });
+          const visualResult = await visualExtractor.extractProviderFromImage(
+            pngBuffer,
+            assignment.canonicalConsortium ?? extracted.consortium ?? ""
+          );
+
+          if (visualResult.providerTaxId || visualResult.providerName) {
+            pipelineLog.stepStart(cid,
+              `→ Gemini Vision extrajo: provider="${visualResult.providerName}" ` +
+              `taxId="${visualResult.providerTaxId}"`
+            );
+
+            if (visualResult.providerTaxId) {
+              extracted.providerTaxId = visualResult.providerTaxId;
+            }
+            if (visualResult.providerName) {
+              extracted.provider = visualResult.providerName;
+            }
+
+            const visualAssignment = await resolveAssignment(
+              extracted, cid, file.id, consortiumRepository, providerRepository, lspProvider
+            );
+
+            if (!visualAssignment.unassigned) {
+              pipelineLog.stepStart(cid, "✅ Fallback visual: proveedor encontrado");
+              assignment = visualAssignment;
+            } else {
+              pipelineLog.stepStart(cid,
+                `⚠️ Fallback visual: proveedor no encontrado en DB ` +
+                `(${visualResult.providerName} / ${visualResult.providerTaxId})`
+              );
+            }
+          } else {
+            pipelineLog.stepStart(cid, "⚠️ Fallback visual: Gemini Vision no pudo extraer el emisor");
+          }
+        } catch (visualError) {
+          pipelineLog.stepStart(cid,
+            `⚠️ Fallback visual falló silenciosamente: ${visualError instanceof Error ? visualError.message : "error"}`
+          );
+        }
+      }
+    }
+    // ── Fin fallback visual ────────────────────────────────────────────────
 
     if (!assignment.unassigned) {
       if (assignment.canonicalConsortium)    extracted.consortium    = assignment.canonicalConsortium;

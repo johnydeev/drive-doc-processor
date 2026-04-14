@@ -1,13 +1,22 @@
 # Changelog
 
+## [Unreleased] - 2026-04-14
+
+### Added
+- Feature: fallback visual con Gemini Vision para facturas donde el CUIT del emisor está en imagen. Se activa SOLO como último recurso cuando el proveedor no fue encontrado por CUIT ni nombre y hasEmitterBlock=false.
+
+---
+
 ## [Unreleased] - 2026-04-09
 
 ### Added
+- Feature: toggle "Modo Debug" por cliente en panel admin. Activa logs detallados de OCR e IA en el pipeline para diagnóstico
 - Script `export-logs.ps1` para exportar logs de Docker a archivos locales con fecha
 - Configuración de rotación de logs en docker-compose.yml (json-file, 50MB x 10)
 - Lock de archivo vía carpeta "Procesando" en Drive: tras descargar, el pipeline mueve el archivo a la carpeta `processing` configurada en `driveFoldersJson.processing` (opcional). Si otro ciclo concurrente escanea Pendientes no lo vuelve a tomar. Los movimientos finales (Escaneados / Sin Asignar / Fallidos) usan Procesando como origen cuando el lock está activo.
 
 ### Fixed
+- Fix buildInvoicePrompt: regla consortium reforzada para evitar confusión emisor/receptor en facturas donde ambos bloques tienen etiquetas similares
 - Fix sync-directory: providerId se resuelve automáticamente al sincronizar LspServices (campo providerName texto se mantiene, providerId es complementario)
 - Rename `LspService.provider` → `providerName` (claridad vs providerId FK)
 - Fix LSP lookup: mapa router→canonicalName resuelve mismatch PERSONAL/TELECOM ARGENTINA S.A.

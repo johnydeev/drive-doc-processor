@@ -30,37 +30,7 @@ Registro cronológico de cambios por fecha. Incluir highlights de lo que se hizo
 Sistema multi-tenant en **Next.js + TypeScript + Prisma + PostgreSQL (Supabase)** para administración de consorcios de propiedad horizontal en Argentina.
 Procesa automáticamente PDFs de facturas/boletas desde Google Drive usando IA (Gemini → OpenAI fallback), extrae datos estructurados, los guarda en la DB y los envía a Google Sheets.
 ---
-## Levantar el entorno de desarrollo
-Requiere **3 procesos simultáneos** en terminales separadas:
-```powershell
-npm run dev       # Servidor Next.js (puerto 3000)
-npm run schedule  # Scheduler: escanea Drive y crea jobs
-npm run worker    # Worker: procesa la cola de jobs
-```
-Atajo en Windows:
-```powershell
-npm run local             # Equivalente: abre las 3 terminales automáticamente
-.\scripts\run-local.ps1   # El script subyacente
-```
-> **IMPORTANTE:** Sin los 3 procesos el sistema no procesa PDFs. Solo `npm run dev` levanta la UI pero no el pipeline.
----
-## Comandos frecuentes
-```powershell
-# Migraciones (siempre en este orden, por separado en PowerShell)
-npx prisma migrate deploy
-npx prisma generate
-# Crear usuario admin inicial
-npx tsx scripts/create-admin.ts admin@empresa.com MiPassword123
-# Diagnóstico de carpetas Drive de clientes
-npx tsx scripts/fix-client-folders.ts              # ver estado
-npx tsx scripts/fix-client-folders.ts --clientId=X --pending=Y --scanned=Z  # reparar
-# Diagnósticos
-npm run diagnose:db       # conexión a base de datos
-npm run diagnose:gemini   # extracción con Gemini
-npm run diagnose -- <fileId>  # Drive: acceso a archivo específico
-```
-> **PowerShell:** El operador `&&` no funciona. Siempre correr los comandos por separado.
----
+
 ## Arquitectura del sistema
 ### Tres procesos
 | Proceso | Comando | Responsabilidad |
@@ -420,19 +390,8 @@ Customizable por cliente en `extractionConfigJson.columnMapping`.
 | `worker` | `node dist/jobs/jobWorkerMain.js` | Procesa cola, depende de web healthy |
 | `tunnel` | `cloudflared tunnel run` | Cloudflare Tunnel, token via env |
 Los 3 servicios comparten `image: drive-doc-processor:latest`. Solo `web` tiene `build:`.
-### Comandos Docker
-```bash
-docker compose up --build -d     # Build + levantar todo en background
-docker compose up -d             # Levantar en background (imagen ya buildeada)
-docker compose logs -f web       # Ver logs de un servicio
-docker compose down              # Bajar todo
-```
-### Variables adicionales para Docker
-```env
-CLOUDFLARE_TUNNEL_TOKEN=         # Token de Cloudflare Tunnel (servicio tunnel)
-HOSTNAME=0.0.0.0                 # Solo para web (ya configurado en compose)
-```
----
+
+
 ## ⚠️ Reglas obligatorias para migraciones de base de datos
 
 Estas reglas son de cumplimiento estricto. No hay excepciones.
@@ -445,23 +404,6 @@ Cuando hay cambios en el schema de Prisma, Claude debe:
 2. Crear el archivo `migration.sql` con el SQL correspondiente
 3. Avisar al owner que hay una migración pendiente y que debe ejecutar el procedimiento completo
 
-El procedimiento que ejecuta el owner es:
-1. `docker compose down`
-2. `npx prisma migrate deploy`
-3. `npx prisma generate`
-4. `docker compose up --build -d`
-
-### Si `prisma migrate dev` se cuelga o falla
-No usar `--create-only` como workaround. Siempre crear la migración manualmente como se describe arriba.
-
-### Resumen de comandos permitidos para Claude
-- ✅ Crear migración manualmente (carpeta + `migration.sql`)
-- ✅ `npx prisma generate` — solo en entorno de desarrollo local
-- ❌ `npx prisma migrate deploy` — lo ejecuta el owner
-- ❌ `npx prisma migrate dev` — puede colgar
-- ❌ `npx prisma migrate dev --create-only` — workaround prohibido
-- ❌ `docker compose down` / `docker compose up` — los ejecuta el owner
----
 ## Variables de entorno requeridas
 ```env
 DATABASE_URL=               # PostgreSQL Supabase (pooler)

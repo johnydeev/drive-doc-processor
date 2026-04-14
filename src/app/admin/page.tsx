@@ -24,6 +24,7 @@ type ClientMetricRow = {
   totals: { runs: number; found: number; processed: number; duplicates: number; failed: number };
   tokensUsed: number; quota: { gemini: string; openai: string };
   consortiumCount: number;
+  debugMode: boolean;
 };
 
 type ClientMetricsResponse = { ok: boolean; error?: string; clients?: ClientMetricRow[]; };
@@ -276,6 +277,32 @@ export default function AdminPage() {
     }
   };
 
+  const handleToggleDebug = async (clientId: string, current: boolean) => {
+    const next = !current;
+    setClientMetrics((prev) =>
+      prev.map((c) => (c.clientId === clientId ? { ...c, debugMode: next } : c))
+    );
+    try {
+      const res = await guardedFetch(`/api/admin/clients/${clientId}/debug-mode`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ debugMode: next }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setClientMetrics((prev) =>
+          prev.map((c) => (c.clientId === clientId ? { ...c, debugMode: current } : c))
+        );
+        setError(data.error ?? "No se pudo cambiar Debug Mode");
+      }
+    } catch {
+      setClientMetrics((prev) =>
+        prev.map((c) => (c.clientId === clientId ? { ...c, debugMode: current } : c))
+      );
+      setError("No se pudo cambiar Debug Mode");
+    }
+  };
+
   const handlePurgeOpen = async (clientId: string, clientName: string) => {
     setPurgeTarget({ clientId, clientName });
     setPurgeStep("preview");
@@ -443,6 +470,15 @@ export default function AdminPage() {
                           <td><span className={styles.metricPill}>🏢 {formatNumber(client.consortiumCount)}</span></td>
                           <td>
                             <div style={{ display: "flex", gap: "6px" }}>
+                              <button
+                                type="button"
+                                className={`${styles.statusBadge} ${client.debugMode ? styles.badgeOn : styles.badgeOff}`}
+                                style={{ cursor: "pointer", border: "none", fontSize: "11px" }}
+                                title="Activa logs detallados de OCR e IA en el pipeline"
+                                onClick={() => handleToggleDebug(client.clientId, client.debugMode)}
+                              >
+                                {client.debugMode ? "🐛 Debug ON" : "🐛 Debug OFF"}
+                              </button>
                               <button
                                 type="button"
                                 className={styles.ghostBtn}

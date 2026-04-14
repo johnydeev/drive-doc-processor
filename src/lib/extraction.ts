@@ -356,8 +356,14 @@ function buildInvoicePrompt(relevantText: string): string {
     "  Si el CUIT del emisor no está en el texto (imagen no copiable): null.",
     "  El sistema puede resolver el proveedor usando allTaxIds aunque este campo sea null.",
 
-    "- consortium: nombre del CONSORCIO receptor. Buscarlo en la sección del receptor:",
-    "  'Razón Social:', 'Cliente:', 'Señores:', etc. Incluir el nombre completo con calle y número.",
+    "- consortium: nombre del CONSORCIO receptor (quien RECIBE y PAGA la factura).",
+    "  Buscarlo exclusivamente en la sección del RECEPTOR/CLIENTE del documento:",
+    "  'Cliente:', 'Razón Social del receptor:', 'Señores:', 'A nombre de:'.",
+    "  NUNCA usar el nombre del emisor/proveedor como consorcio.",
+    "  El emisor aparece en el bloque SUPERIOR con su domicilio, teléfono,",
+    "  CUIT e inicio de actividades. El consorcio es quien figura como CLIENTE.",
+    "  Si el campo 'Cliente:' contiene solo una dirección (ej: 'BELGRANO 1431'),",
+    "  ese valor ES el nombre del consorcio — usarlo tal cual.",
 
     "- amount: monto TOTAL a pagar ('Importe Total', 'Total a pagar'). Nunca un subtotal.",
     "  Formato numérico sin símbolos (ej: 34400.01).",
