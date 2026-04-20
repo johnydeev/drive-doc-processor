@@ -185,8 +185,27 @@ function isUtilityBill(textOrUpper: string): boolean {
 // Main prompt builder — entry point
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Detecta si el texto corresponde a un recibo de haberes de un empleado de consorcio.
+ * Analiza los primeros 3000 caracteres del texto.
+ */
+export function isReciboHaberes(text: string): boolean {
+  const upper = text.slice(0, 3000).toUpperCase();
+  return (
+    upper.includes("RECIBO DE HABERES") ||
+    upper.includes("NETO A COBRAR") ||
+    (upper.includes("SUELDO") && upper.includes("CUIL"))
+  );
+}
+
 export function buildExtractionPrompt(text: string): string {
   const relevantText = extractRelevantLines(text, 80);
+
+  // Detectar recibos de haberes antes del router LSP
+  if (isReciboHaberes(text)) {
+    return buildReciboHaberesPrompt(relevantText);
+  }
+
   const lspProvider = identifyLSPProvider(text);
 
   if (!lspProvider) {
@@ -848,4 +867,52 @@ export function refineExtractionWithRawText(
     ...extracted,
     consortium: inferredConsortium,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Recibo de Haberes — Prompt
+// ═══════════════════════════════════════════════════════════════════════════
+
+function buildReciboHaberesPrompt(relevantText: string): string {
+  return [
+    "Extrae datos de un recibo de haberes de un empleado de consorcio en Argentina.",
+    JSON_RESPONSE_INSTRUCTION,
+
+    "=== REGLAS ===",
+
+    "- boletaNumber: número de recibo o liquidación si aparece. null si no.",
+
+    "- provider: nombre completo del EMPLEADO (quien recibe el sueldo).",
+    "  Buscarlo en 'EMPLEADO:', 'Apellido y Nombre:', o el nombre que figura",
+    "  junto al CUIL del empleado.",
+
+    "- providerTaxId: CUIL del EMPLEADO (formato XX-XXXXXXXX-X).",
+    "  Está junto al nombre del empleado, NO el CUIT del empleador/consorcio.",
+    "  El CUIT del empleador/consorcio NO es el providerTaxId.",
+
+    "- consortium: nombre del consorcio EMPLEADOR.",
+    "  Buscarlo en 'EMPLEADOR:', 'Consorcio de propietarios', o similar.",
+    "  Incluir solo calle y número (ej: 'VILLARROEL 1181').",
+
+    "- amount: valor del campo 'NETO A COBRAR' o 'NETO A PAGAR'.",
+    "  Es el monto final después de deducciones. Formato numérico sin símbolos.",
+    "  NUNCA usar el sueldo bruto ni el total de haberes.",
+
+    "- dueDate: fecha del recibo o fecha de pago. YYYY-MM-DD.",
+    "  Buscarlo en 'BUENOS AIRES, DD.MM.YYYY' o similar.",
+    "  Si no hay fecha de pago explícita: null.",
+
+    "- detail: 'Haberes [MES/AÑO]' usando el período de liquidación.",
+    "  Ej: 'Haberes marzo/2026'.",
+
+    "- clientNumber: null (no aplica).",
+    "- paymentMethod: null (no aplica).",
+
+    ALL_TAX_IDS_RULES,
+
+    "Usa null si un dato falta o es incierto. No inventes datos.",
+
+    "Texto del recibo:",
+    relevantText,
+  ].join("\n\n");
 }

@@ -12,6 +12,18 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 
 ## Completado ✅
 
+- **Soporte imágenes JPG/PNG en pipeline** (15/04/2026)
+  - Scheduler detecta image/jpeg e image/png además de application/pdf
+  - Pipeline detecta tipo de archivo y usa Gemini Vision directamente
+  - Sin OCR ni pdf-parse para imágenes — extracción 100% visual
+  - Nuevo método `extractStructuredDataFromImage()` en GeminiExtractorService
+- **Soporte empleados de consorcio** (15/04/2026)
+  - ProviderType enum: PROVEEDOR / EMPLEADO en tabla Provider
+  - Prompt dedicado para recibos de haberes (`buildReciboHaberesPrompt`)
+  - Router `isReciboHaberes()` detecta recibos antes del router LSP
+  - Sync-directory con columna TIPO en `_Proveedores`
+  - UI: badge EMPLEADO en select, label CUIL/CUIT según tipo
+  - Migración: `20260415000100_add_provider_type`
 - **Fallback visual Gemini Vision** (14/04/2026)
   - Última instancia cuando proveedor no matchea y emisor está en imagen
   - Gemini recibe el PNG de pdftoppm y extrae nombre y CUIT del emisor visualmente

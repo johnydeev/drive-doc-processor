@@ -20,7 +20,7 @@ type Period      = { id: string; year: number; month: number; status: "ACTIVE" |
 type Coeficiente = { id: string; name: string; value: number; };
 type Rubro       = { id: string; name: string; };
 type Consortium  = { id: string; canonicalName: string; rawName: string; cuit: string | null; cutoffDay: number; matchNames: string | null; periods: Period[]; _count: { invoices: number }; };
-type Provider    = { id: string; canonicalName: string; cuit: string | null; paymentAlias: string | null; };
+type Provider    = { id: string; canonicalName: string; cuit: string | null; paymentAlias: string | null; providerType?: "PROVEEDOR" | "EMPLEADO"; };
 type Invoice     = {
   id: string; boletaNumber: string | null; provider: string | null; providerTaxId: string | null;
   detail: string | null; observation: string | null; issueDate: string | null; dueDate: string | null;
@@ -1186,7 +1186,7 @@ export default function ConsortiumsPage() {
                   <option value="">Seleccioná un proveedor</option>
                   {providers.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.canonicalName}{p.paymentAlias ? ` (${p.paymentAlias})` : ""}
+                      {p.canonicalName}{p.paymentAlias ? ` (${p.paymentAlias})` : ""}{p.providerType === "EMPLEADO" ? " [EMPLEADO]" : ""}
                     </option>
                   ))}
                 </select>
@@ -1198,7 +1198,7 @@ export default function ConsortiumsPage() {
 
               <div className={styles.formField}>
                 <label>
-                  CUIT / CUIL emisor
+                  {matchedProvider?.providerType === "EMPLEADO" ? "CUIL" : "CUIT"} emisor
                   {matchedProvider && <span className={styles.canonLabel}> ✓ verificado</span>}
                 </label>
                 <input

@@ -4,6 +4,47 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-15 — Soporte de imágenes JPG/PNG en pipeline
+
+### Problema
+El scheduler solo detectaba PDFs. Imágenes JPG/PNG en la carpeta Pendientes eran ignoradas completamente. Algunos proveedores envían fotos de facturas en lugar de PDFs.
+
+### Decisión
+Extender el filtro de mimeType en GoogleDriveService para incluir image/jpeg e image/png. En el pipeline, cuando el archivo es una imagen, saltear pdf-parse y OCR y usar Gemini Vision directamente con el buffer de la imagen. El flujo de matching, deduplicación y movimiento de archivos permanece igual. `lspProvider` queda como `null` para imágenes (no tiene sentido correr el router LSP sin texto).
+
+### Alternativas descartadas
+- **Convertir imagen a PDF primero**: agrega complejidad y dependencia (ImageMagick), sin beneficio real ya que Gemini Vision procesa imágenes nativamente.
+- **OCR con Tesseract sobre la imagen**: peor calidad que Gemini Vision directo.
+
+### Impacto
+- Modificado: `src/services/googleDrive.service.ts` — query mimeType ampliado
+- Modificado: `src/services/geminiExtractor.service.ts` — `extractStructuredDataFromImage()`
+- Modificado: `src/jobs/processPendingDocuments.job.ts` — detección `isImage`, rama visual
+- Modificado: `ProcessDriveFileInput` — nuevo campo `mimeType`
+
+---
+
+## 2026-04-15 — Empleados de consorcio como tipo de proveedor
+
+### Problema
+Los consorcios tienen empleados (encargados) cuyos recibos de haberes necesitan ser trackeados igual que las facturas de proveedores. Los recibos tienen estructura diferente: CUIL en lugar de CUIT, neto a cobrar en lugar de importe total, período de liquidación.
+
+### Decisión
+Extender la tabla Provider con un campo `providerType` (enum PROVEEDOR/EMPLEADO) en lugar de crear una tabla Employee separada. Los empleados se dan de alta en la misma hoja `_Proveedores` del archivo ALTA con una columna TIPO. El pipeline detecta recibos de haberes por keywords (`isReciboHaberes()`) y usa un prompt dedicado que extrae CUIL y neto a cobrar correctamente.
+
+### Alternativas descartadas
+- **Tabla Employee separada**: requiere migración más compleja, duplica infraestructura de matching y Sheets. El modelo de datos es el mismo.
+- **Campo libre en matchNames**: poco explícito y no permite filtrar en UI.
+
+### Impacto
+- Migración: `20260415000100_add_provider_type`
+- Modificado: `src/services/googleSheets.service.ts` (DirectoryData, readDirectory, header TIPO)
+- Modificado: `src/app/api/client/sync-directory/route.ts` (providerType en upsert)
+- Modificado: `src/lib/extraction.ts` (isReciboHaberes, buildReciboHaberesPrompt)
+- Modificado: `src/app/admin/consortiums/page.tsx` (badge EMPLEADO, label CUIL)
+
+---
+
 ## 2026-04-14 — Fallback visual Gemini Vision para emisor en imagen
 
 ### Problema

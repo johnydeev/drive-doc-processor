@@ -224,6 +224,7 @@ export async function POST(request: NextRequest) {
             cuit: p.cuit,
             matchNames: p.matchNames,
             paymentAlias: p.paymentAlias,
+            providerType: p.providerType,
           })),
         });
       }
@@ -232,7 +233,7 @@ export async function POST(request: NextRequest) {
       await Promise.all(existingProvidersToUpdate.map(p =>
         tx.provider.update({
           where: { id: existingProviderMap.get(p.canonicalName)! },
-          data: { cuit: p.cuit, matchNames: p.matchNames, paymentAlias: p.paymentAlias },
+          data: { cuit: p.cuit, matchNames: p.matchNames, paymentAlias: p.paymentAlias, providerType: p.providerType },
         })
       ));
 

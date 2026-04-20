@@ -39,6 +39,7 @@ export interface ProcessJobConfig {
 export interface ProcessDriveFileInput {
   id: string;
   name: string;
+  mimeType?: string | null;
   webViewLink?: string | null;
 }
 
@@ -551,7 +552,46 @@ async function processDriveFile(
 
     let lspProvider: ReturnType<typeof identifyLSPProvider> = null;
 
-    if (existingByHash?.extraction) {
+    // Detectar si el archivo es una imagen (JPG/PNG)
+    const isImage = (
+      file.mimeType?.startsWith("image/") ||
+      /\.(jpg|jpeg|png)$/i.test(file.name)
+    );
+
+    if (isImage) {
+      // ── Flujo imagen: extracción directa con Gemini Vision ──
+      pipelineLog.stepStart(cid, `→ Archivo de imagen detectado (${file.mimeType ?? file.name}) — usando Gemini Vision`);
+
+      if (existingByHash?.extraction) {
+        const { sourceFileUrl: _url, isDuplicate: _dup, ...storedFields } =
+          existingByHash.extraction as ExtractedDocumentData;
+        extracted = { ...storedFields };
+      } else if (geminiModule && geminiApiKey) {
+        const imageMimeType: "image/jpeg" | "image/png" =
+          file.mimeType?.includes("png") ? "image/png" : "image/jpeg";
+        try {
+          const extractor = new geminiModule.GeminiExtractorService({ apiKey: geminiApiKey, model: geminiModel });
+          extracted = await runStep("Extracción IA (Gemini Vision)", () =>
+            extractor.extractStructuredDataFromImage(buffer, imageMimeType)
+          );
+          fileAiUsage = extractor.getLastUsage?.() ?? null;
+          accumulateTokenUsage(summary.tokenUsage, fileAiUsage);
+          pipelineLog.aiExtraction(cid, "gemini", true);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : "Gemini Vision error";
+          pipelineLog.aiExtraction(cid, "gemini", false, msg);
+          extracted = buildOcrOnlyPayload();
+        }
+      } else {
+        pipelineLog.stepStart(cid, "⚠️ Imagen sin Gemini configurado — no se puede procesar");
+        extracted = buildOcrOnlyPayload();
+      }
+
+      if (resolvedConfig.debugMode && extracted) {
+        pipelineLog.stepStart(cid, `[DEBUG-AI] respuesta raw: ${JSON.stringify(extracted)}`);
+      }
+    } else if (existingByHash?.extraction) {
+      // ── Flujo PDF: duplicado por hash con extracción previa ──
       const { sourceFileUrl: _url, isDuplicate: _dup, ...storedFields } =
         existingByHash.extraction as ExtractedDocumentData;
       extracted = { ...storedFields };
@@ -559,6 +599,7 @@ async function processDriveFile(
       lspProvider = identifyLSPProvider(text);
       extracted = refineExtractionWithRawText(extracted, text);
     } else {
+      // ── Flujo PDF: extracción normal ──
       // Primera pasada: texto completo para detección
       const fullText = await runStep("Extracción de texto (PDF)", () => pdfExtractor.extractTextFromPdf(buffer));
 
@@ -827,7 +868,7 @@ export async function processPendingDocumentsJob(
   for (const file of files) {
     if (processedIds.has(file.id)) { summary.skipped += 1; continue; }
     processedIds.add(file.id);
-    await processDriveFile({ id: file.id, name: file.name, webViewLink: file.webViewLink }, context, summary);
+    await processDriveFile({ id: file.id, name: file.name, mimeType: file.mimeType, webViewLink: file.webViewLink }, context, summary);
   }
 
   pipelineLog.batchSummary(resolvedConfig.clientId, {

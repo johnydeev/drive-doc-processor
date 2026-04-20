@@ -67,7 +67,7 @@ function formatAmountARS(value: number | string | null | undefined): string {
 
 export interface DirectoryData {
   consortiums: { canonicalName: string; cuit: string | null; matchNames: string | null; paymentAlias: string | null }[];
-  providers: { canonicalName: string; cuit: string | null; matchNames: string | null; paymentAlias: string | null }[];
+  providers: { canonicalName: string; cuit: string | null; matchNames: string | null; paymentAlias: string | null; providerType: "PROVEEDOR" | "EMPLEADO" }[];
   rubros: { name: string; description: string | null }[];
   coeficientes: { code: string; name: string }[];
   lspServices: { consortiumName: string; provider: string; clientNumber: string; description: string | null }[];
@@ -262,7 +262,7 @@ export class GoogleSheetsService {
 
     const TABS: { name: string; headers: string[]; cols: string }[] = [
       { name: "_Consorcios",  headers: ["NOMBRE CANÓNICO", "CUIT", "NOMBRES ALTERNATIVOS", "ALIAS"], cols: "A:D" },
-      { name: "_Proveedores", headers: ["NOMBRE CANÓNICO", "CUIT", "NOMBRES ALTERNATIVOS", "ALIAS"], cols: "A:D" },
+      { name: "_Proveedores", headers: ["NOMBRE CANÓNICO", "CUIT", "NOMBRES ALTERNATIVOS", "ALIAS", "TIPO"], cols: "A:E" },
       { name: "_Rubros",      headers: ["NOMBRE", "DESCRIPCIÓN"],              cols: "A:B" },
       { name: "_Coeficientes",headers: ["NOMBRE", "CÓDIGO"],                   cols: "A:B" },
       { name: "_LspServices", headers: ["NOMBRE CANÓNICO", "PROVEEDOR", "NRO CLIENTE", "DESCRIPCIÓN"], cols: "A:D" },
@@ -321,7 +321,7 @@ export class GoogleSheetsService {
 
     const [consortiumRows, providerRows, rubroRows, coeficienteRows, lspServiceRows] = await Promise.all([
       readTab("_Consorcios", "A:D"),
-      readTab("_Proveedores", "A:D"),
+      readTab("_Proveedores", "A:E"),
       readTab("_Rubros", "A:B"),
       readTab("_Coeficientes", "A:B"),
       readTab("_LspServices", "A:D"),
@@ -338,12 +338,16 @@ export class GoogleSheetsService {
         .filter((c) => c.canonicalName),
 
       providers: providerRows
-        .map((row) => ({
-          canonicalName: row[0]?.toString().trim().toUpperCase() ?? "",
-          cuit: row[1]?.toString().trim() || null,
-          matchNames: row[2]?.toString().trim() || null,
-          paymentAlias: row[3]?.toString().trim() || null,
-        }))
+        .map((row) => {
+          const providerTypeRaw = (row[4] as string | undefined)?.trim().toUpperCase();
+          return {
+            canonicalName: row[0]?.toString().trim().toUpperCase() ?? "",
+            cuit: row[1]?.toString().trim() || null,
+            matchNames: row[2]?.toString().trim() || null,
+            paymentAlias: row[3]?.toString().trim() || null,
+            providerType: providerTypeRaw === "EMPLEADO" ? ("EMPLEADO" as const) : ("PROVEEDOR" as const),
+          };
+        })
         .filter((p) => p.canonicalName),
 
       rubros: rubroRows

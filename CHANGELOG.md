@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased] - 2026-04-15
+
+### Added
+- Feature: soporte para archivos JPG/PNG en carpeta Pendientes de Drive. El scheduler los detecta y el pipeline los procesa directamente con Gemini Vision sin pasar por pdf-parse ni Tesseract OCR.
+  - GoogleDriveService: query mimeType ampliado a image/jpeg e image/png
+  - GeminiExtractorService: nuevo método `extractStructuredDataFromImage()`
+  - Pipeline: detección `isImage` por mimeType/extensión, rama de procesamiento visual
+  - ProcessDriveFileInput: nuevo campo `mimeType` opcional
+- Feature: soporte para empleados de consorcio como tipo de proveedor
+  - Nuevo enum `ProviderType` (PROVEEDOR / EMPLEADO) en tabla Provider
+  - Sync-directory lee columna TIPO de hoja `_Proveedores` (5ta columna)
+  - Nuevo prompt `buildReciboHaberesPrompt` para recibos de haberes
+  - Router `isReciboHaberes()` detecta recibos por keywords antes del router LSP
+  - UI: badge `[EMPLEADO]` en select de proveedores, etiqueta CUIL/CUIT según tipo
+  - `amount` extrae NETO A COBRAR en recibos de haberes
+  - Migración: `20260415000100_add_provider_type`
+
+---
+
 ## [Unreleased] - 2026-04-14
 
 ### Added

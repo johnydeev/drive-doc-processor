@@ -59,7 +59,7 @@ export class GoogleDriveService {
   async listPdfFilesInFolder(folderId: string): Promise<DrivePdfFile[]> {
     const q = [
       `'${folderId}' in parents`,
-      "mimeType='application/pdf'",
+      "(mimeType='application/pdf' or mimeType='image/jpeg' or mimeType='image/png')",
       "trashed=false",
     ].join(" and ");
 

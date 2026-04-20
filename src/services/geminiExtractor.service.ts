@@ -179,4 +179,69 @@ export class GeminiExtractorService {
     }
     return { providerName: null, providerTaxId: null };
   }
+
+  async extractStructuredDataFromImage(
+    imageBuffer: Buffer,
+    mimeType: "image/jpeg" | "image/png"
+  ): Promise<ExtractedDocumentData> {
+    this.lastUsage = null;
+    const base64Image = imageBuffer.toString("base64");
+    const prompt = buildExtractionPrompt("__IMAGE_INPUT__");
+    const visualPrompt = prompt.replace(
+      /Texto de la factura:[\s\S]*$|Texto del recibo:[\s\S]*$|Texto relevante:[\s\S]*$/,
+      "La factura/documento está en la imagen adjunta. Extraé todos los datos según las reglas anteriores."
+    );
+
+    const contents = [{
+      role: "user" as const,
+      parts: [
+        { inlineData: { mimeType, data: base64Image } },
+        { text: visualPrompt },
+      ],
+    }];
+
+    const errors: string[] = [];
+
+    for (const modelName of this.buildModelCandidates()) {
+      try {
+        const model = this.getModel(modelName);
+        const response = await model.generateContent({
+          contents,
+          generationConfig: { temperature: 0, responseMimeType: "application/json" },
+        });
+        const outputText = response.response.text() || "{}";
+        const parsed = parseExtractionOutput(outputText);
+        const refined = refineExtractionWithRawText(parsed, "");
+
+        const usageMetadata = (
+          response.response as unknown as {
+            usageMetadata?: {
+              promptTokenCount?: number;
+              candidatesTokenCount?: number;
+              totalTokenCount?: number;
+            };
+          }
+        ).usageMetadata;
+
+        const inputTokens = Number(usageMetadata?.promptTokenCount ?? 0);
+        const outputTokens = Number(usageMetadata?.candidatesTokenCount ?? 0);
+        const totalTokens = Number(usageMetadata?.totalTokenCount ?? inputTokens + outputTokens);
+
+        this.lastUsage = {
+          provider: "gemini",
+          model: modelName,
+          inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+          outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+          totalTokens: Number.isFinite(totalTokens) ? totalTokens : 0,
+        };
+
+        GeminiExtractorService.workingModelName = modelName;
+        return refined;
+      } catch (error) {
+        errors.push(`${modelName}: ${normalizeError(error)}`);
+      }
+    }
+
+    throw new Error(`Gemini Vision image extraction failed for all candidate models. ${errors.join(" | ")}`);
+  }
 }
