@@ -687,6 +687,15 @@ async function processDriveFile(
       }
     }
 
+    // Guard: clientNumber es exclusivo de boletas LSP.
+    // Si la IA alucinó un valor para una boleta normal, limpiarlo.
+    if (!lspProvider && extracted.clientNumber) {
+      pipelineLog.stepStart(cid,
+        `⚠️  clientNumber limpiado para boleta no-LSP (era "${extracted.clientNumber}")`
+      );
+      extracted.clientNumber = null;
+    }
+
     extracted.sourceFileUrl = sourceFileUrl;
     extracted.isDuplicate = isDuplicate ? "YES" : "NO";
     extracted.paymentStatus = "Sin pagar";
@@ -789,20 +798,24 @@ async function processDriveFile(
     );
     pipelineLog.movedToScanned(cid, file.id);
 
-    await runStep("Guardar invoice", () =>
-      invoiceRepository.saveProcessedInvoice({
-        clientId: cid, documentHash: fileHash, fileId: file.id,
-        sourceFileUrl, extraction: extractionFields, isDuplicate,
-        consortiumId: assignment.consortiumId, providerId: assignment.providerId, periodId: assignment.periodId,
-        lspServiceId: assignment.lspServiceId, paymentMethod: extracted!.paymentMethod,
-        tokensInput: fileAiUsage?.inputTokens ?? null,
-        tokensOutput: fileAiUsage?.outputTokens ?? null,
-        tokensTotal: fileAiUsage?.totalTokens ?? null,
-        aiProvider: fileAiUsage?.provider ?? null,
-        aiModel: fileAiUsage?.model ?? null,
-      })
-    );
-    pipelineLog.invoiceSaved(cid, isDuplicate);
+    if (!isDuplicate) {
+      await runStep("Guardar invoice", () =>
+        invoiceRepository.saveProcessedInvoice({
+          clientId: cid, documentHash: fileHash, fileId: file.id,
+          sourceFileUrl, extraction: extractionFields, isDuplicate,
+          consortiumId: assignment.consortiumId, providerId: assignment.providerId, periodId: assignment.periodId,
+          lspServiceId: assignment.lspServiceId, paymentMethod: extracted!.paymentMethod,
+          tokensInput: fileAiUsage?.inputTokens ?? null,
+          tokensOutput: fileAiUsage?.outputTokens ?? null,
+          tokensTotal: fileAiUsage?.totalTokens ?? null,
+          aiProvider: fileAiUsage?.provider ?? null,
+          aiModel: fileAiUsage?.model ?? null,
+        })
+      );
+      pipelineLog.invoiceSaved(cid, isDuplicate);
+    } else {
+      pipelineLog.stepStart(cid, "📋 Duplicado — no se guarda en DB (solo Sheets)");
+    }
 
     if (duplicateKey) existingDuplicateKeys.add(duplicateKey);
     if (isDuplicate)  summary.duplicatesDetected += 1;

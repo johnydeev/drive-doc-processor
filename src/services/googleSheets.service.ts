@@ -418,4 +418,78 @@ export class GoogleSheetsService {
       updatedRows: response.data.updatedRows,
     };
   }
+
+  /**
+   * Busca la fila que coincida con sourceFileUrl (col K) o boletaNumber (col A) + providerTaxId (col D)
+   * y actualiza la columna de paymentStatus con el estado indicado.
+   */
+  async updatePaymentStatus(
+    sheetName: string,
+    mapping: SheetsRowMapping,
+    keys: { boletaNumber?: string | null; sourceFileUrl?: string | null; providerTaxId?: string | null },
+    status: string
+  ): Promise<boolean> {
+    const boletaCol = mapping.boletaNumber;
+    const sourceCol = mapping.sourceFileUrl;
+    const taxCol = mapping.providerTaxId;
+    const statusCol = mapping.paymentStatus;
+
+    const range = this.getRangeFromMapping(sheetName, mapping);
+    const response = await this.withRetry(() =>
+      this.sheets.spreadsheets.values.get({
+        spreadsheetId: this.spreadsheetId,
+        range,
+      })
+    );
+    const rows = response.data.values ?? [];
+    if (rows.length < 2) return false;
+
+    const columnOffsets = Object.values(mapping).map((c) => this.columnToIndex(c));
+    const minIndex = Math.min(...columnOffsets);
+
+    const idx = (col: string) => this.columnToIndex(col) - minIndex;
+
+    const boletaIdx = idx(boletaCol);
+    const sourceIdx = idx(sourceCol);
+    const taxIdx = idx(taxCol);
+
+    const targetSource = (keys.sourceFileUrl ?? "").trim();
+    const targetBoleta = (keys.boletaNumber ?? "").trim();
+    const targetTax = (keys.providerTaxId ?? "").replace(/\D/g, "");
+
+    let matchedRow = -1;
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i];
+      const sourceCell = (row[sourceIdx] ?? "").toString().trim();
+      const boletaCell = (row[boletaIdx] ?? "").toString().trim();
+      const taxCell = (row[taxIdx] ?? "").toString().replace(/\D/g, "");
+
+      if (targetSource && sourceCell && sourceCell === targetSource) {
+        matchedRow = i + 1;
+        break;
+      }
+      if (
+        targetBoleta &&
+        boletaCell &&
+        boletaCell === targetBoleta &&
+        (!targetTax || !taxCell || taxCell === targetTax)
+      ) {
+        matchedRow = i + 1;
+        break;
+      }
+    }
+
+    if (matchedRow < 2) return false;
+
+    await this.withRetry(() =>
+      this.sheets.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range: `${sheetName}!${statusCol}${matchedRow}:${statusCol}${matchedRow}`,
+        valueInputOption: "RAW",
+        requestBody: { values: [[status]] },
+      })
+    );
+
+    return true;
+  }
 }

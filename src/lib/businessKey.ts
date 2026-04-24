@@ -117,3 +117,41 @@ export function buildBusinessKeyString(parts: BusinessKeyParts): string | null {
     parts.amountNorm,
   ].join("|");
 }
+
+/**
+ * Evalúa si dos extracted data son duplicados.
+ * Regla: si boletaNumber está presente en ambos y son DISTINTOS → NO duplicado.
+ * Solo se considera duplicado si todos los campos presentes coinciden.
+ */
+export function isDuplicateByPriority(
+  existing: BusinessKeyParts,
+  incoming: BusinessKeyParts
+): boolean {
+  // Si ambos tienen boletaNumber y son distintos → nunca duplicado
+  if (
+    existing.boletaNumberNorm &&
+    incoming.boletaNumberNorm &&
+    existing.boletaNumberNorm !== incoming.boletaNumberNorm
+  ) {
+    return false;
+  }
+
+  // Si boletaNumber coincide (o alguno está vacío), verificar los demás campos
+  // Solo son duplicados si todos los campos no vacíos coinciden
+  const fields: (keyof BusinessKeyParts)[] = [
+    "boletaNumberNorm",
+    "providerTaxIdNorm",
+    "dueDateNorm",
+    "amountNorm",
+  ];
+
+  for (const field of fields) {
+    const a = existing[field];
+    const b = incoming[field];
+    // Si ambos tienen valor y son distintos → no duplicado
+    if (a && b && a !== b) return false;
+  }
+
+  // Todos los campos presentes coinciden → duplicado
+  return true;
+}

@@ -2,7 +2,22 @@
 
 ## [Unreleased] - 2026-04-15
 
+### Fixed
+- Fix: `clientNumber` se limpia automáticamente para boletas no-LSP si Gemini alucina un valor (campo reservado exclusivamente para boletas LSP)
+- Fix deduplicación: `boletaNumber` distinto → nunca duplicado, independiente de monto y vencimiento. Caso testigo: dos facturas RANKO S.R.L. con números 0003-00154753 y 0003-00155282 se marcaban como duplicado por compartir monto/período.
+- Fix: los duplicados no se guardan en DB — solo se registran en Sheets (con `ES_DUPLICADO=YES`) y se mueven a Escaneados.
+
 ### Added
+- Feature: solapa Pagos en vista de consorcio
+  - Tabs Boletas / Pagos en el header del consorcio (reset a "boletas" al cambiar de consorcio)
+  - Vista Pagos con tabla inline editable (fecha, importe, medio de pago)
+  - Empleados: solo fecha de pago (monto siempre total)
+  - Proveedores: fecha + importe editable + medio de pago
+  - Botón GUARDAR confirma todos los pagos pendientes en un solo click
+  - Al guardar: actualiza `isPaid`/`remainingBalance` en DB y reescribe columna N ("ESTADO PAGO") en Sheets
+  - Medios de pago: Transferencia/Cheque propio con banco del consorcio, Descuento, Efectivo
+- Migración `20260415000200_payment_optional_drive_add_payment_method`: `Payment.driveFileId`/`driveFileUrl` ahora opcionales, nuevo campo `Payment.paymentMethod` (texto libre)
+- `GoogleSheetsService.updatePaymentStatus()`: busca fila por `sourceFileUrl` o `boletaNumber+providerTaxId` y actualiza la columna `paymentStatus`
 - Feature: soporte para archivos JPG/PNG en carpeta Pendientes de Drive. El scheduler los detecta y el pipeline los procesa directamente con Gemini Vision sin pasar por pdf-parse ni Tesseract OCR.
   - GoogleDriveService: query mimeType ampliado a image/jpeg e image/png
   - GeminiExtractorService: nuevo método `extractStructuredDataFromImage()`

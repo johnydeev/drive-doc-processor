@@ -12,6 +12,19 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 
 ## Completado ✅
 
+- **Fix lógica de deduplicación** (15/04/2026)
+  - `boletaNumber` es campo primario: si es distinto → no es duplicado (aunque monto y vencimiento coincidan)
+  - `findDuplicateByBusinessKey` ahora arma `WHERE` dinámico solo con campos presentes y requiere ≥ 2 condiciones
+  - Nueva función `isDuplicateByPriority` en `src/lib/businessKey.ts` para validar en memoria
+  - Duplicados detectados **no se persisten en DB** — solo se escriben en Sheets (columna L = "YES") y se mueven a Escaneados
+- **Solapa Pagos en vista de consorcio** (15/04/2026)
+  - Tabs Boletas/Pagos en el header del consorcio
+  - `PagosView` inline con tabla editable (fecha, importe, medio de pago)
+  - Empleados: pagan monto total (readonly); proveedores: pueden pagar parcial
+  - Medios de pago dinámicos con banco del consorcio (Transferencia/Cheque propio [BANCO]), Descuento, Efectivo
+  - Botón GUARDAR sincroniza DB + Google Sheets (columna N "ESTADO PAGO" → "Pagado")
+  - Migración `20260415000200`: `Payment.driveFileId`/`driveFileUrl` opcionales + nuevo `paymentMethod` (texto libre)
+  - Nuevo método `GoogleSheetsService.updatePaymentStatus()` busca fila por URL o boletaNumber+CUIT
 - **Soporte imágenes JPG/PNG en pipeline** (15/04/2026)
   - Scheduler detecta image/jpeg e image/png además de application/pdf
   - Pipeline detecta tipo de archivo y usa Gemini Vision directamente

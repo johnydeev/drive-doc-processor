@@ -66,7 +66,7 @@ export async function GET(
       return NextResponse.json({ ok: false, error: "Consorcio no encontrado" }, { status: 404 });
     }
 
-    const invoices = await prisma.invoice.findMany({
+    const rawInvoices = await prisma.invoice.findMany({
       where: {
         consortiumId,
         clientId: auth.session.clientId,
@@ -75,9 +75,15 @@ export async function GET(
       include: {
         coeficienteRef: { select: { id: true, name: true, value: true } },
         rubroRef:       { select: { id: true, name: true } },
+        providerRef:    { select: { providerType: true } },
       },
       orderBy: { createdAt: "desc" },
     });
+
+    const invoices = rawInvoices.map((inv) => ({
+      ...inv,
+      providerType: inv.providerRef?.providerType ?? "PROVEEDOR",
+    }));
 
     return NextResponse.json({ ok: true, invoices });
   } catch (error) {

@@ -8,8 +8,9 @@ export interface CreatePaymentInput {
   paymentDate: Date;
   installmentNumber?: number;
   totalInstallments?: number;
-  driveFileId: string;
-  driveFileUrl: string;
+  driveFileId?: string | null;
+  driveFileUrl?: string | null;
+  paymentMethod?: string | null;
   observation?: string;
 }
 
@@ -134,8 +135,9 @@ export class PaymentRepository {
           paymentDate: input.paymentDate,
           installmentNumber,
           totalInstallments,
-          driveFileId: input.driveFileId,
-          driveFileUrl: input.driveFileUrl,
+          driveFileId: input.driveFileId ?? null,
+          driveFileUrl: input.driveFileUrl ?? null,
+          paymentMethod: input.paymentMethod ?? null,
           observation: input.observation ?? null,
         },
       });

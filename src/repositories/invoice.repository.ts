@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { Invoice } from "@prisma/client";
+import { Invoice, Prisma } from "@prisma/client";
 import {
   buildBusinessKeyParts,
   buildBusinessKeyString,
@@ -75,16 +75,37 @@ export class InvoiceRepository {
       return null;
     }
 
+    // Si hay boletaNumber, es el campo primario — debe coincidir exactamente.
+    // Si no hay boletaNumber, buscar por los demás campos presentes.
+    // Solo se incluyen en el WHERE los campos no vacíos para evitar matches
+    // contra filas con strings vacíos.
+    const whereClause: Prisma.InvoiceWhereInput = { clientId };
+
+    if (parts.boletaNumberNorm) {
+      whereClause.boletaNumberNorm = parts.boletaNumberNorm;
+    }
+    if (parts.providerTaxIdNorm) {
+      whereClause.providerTaxIdNorm = parts.providerTaxIdNorm;
+    }
+    if (parts.dueDateNorm) {
+      whereClause.dueDateNorm = parts.dueDateNorm;
+    }
+    if (parts.amountNorm) {
+      whereClause.amountNorm = parts.amountNorm;
+    }
+
+    // Requerir al menos 2 campos presentes para considerar un posible duplicado
+    const conditionCount = [
+      parts.boletaNumberNorm,
+      parts.providerTaxIdNorm,
+      parts.dueDateNorm,
+      parts.amountNorm,
+    ].filter(Boolean).length;
+
+    if (conditionCount < 2) return null;
+
     const prisma = getPrismaClient();
-    const invoice = await prisma.invoice.findFirst({
-      where: {
-        clientId,
-        boletaNumberNorm: parts.boletaNumberNorm,
-        providerTaxIdNorm: parts.providerTaxIdNorm,
-        dueDateNorm: parts.dueDateNorm,
-        amountNorm: parts.amountNorm,
-      },
-    });
+    const invoice = await prisma.invoice.findFirst({ where: whereClause });
 
     if (!invoice) {
       return null;

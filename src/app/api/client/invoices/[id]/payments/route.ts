@@ -6,13 +6,35 @@ import {
   PaymentRepository,
   PaymentError,
 } from "@/repositories/payment.repository";
+import { GoogleSheetsService, SheetsRowMapping } from "@/services/googleSheets.service";
+import { resolveGoogleConfig, resolveMapping, resolveSheetName } from "@/lib/clientProcessingConfig";
+import { ClientDriveFolders, ClientGoogleConfig, ProcessingClient } from "@/types/client.types";
+
+const DEFAULT_MAPPING: SheetsRowMapping = {
+  boletaNumber: "A",
+  provider: "B",
+  consortium: "C",
+  providerTaxId: "D",
+  detail: "E",
+  observation: "F",
+  dueDate: "G",
+  amount: "H",
+  alias: "I",
+  clientNumber: "J",
+  sourceFileUrl: "K",
+  isDuplicate: "L",
+  period: "M",
+  paymentStatus: "N",
+  bank: "O",
+};
 
 const createPaymentSchema = z.object({
   amount: z.number().positive("El monto debe ser positivo"),
   paymentDate: z.string().refine((v) => !isNaN(Date.parse(v)), "Fecha inválida"),
   totalInstallments: z.number().int().min(2).optional(),
-  driveFileId: z.string().min(1, "driveFileId es requerido"),
-  driveFileUrl: z.string().min(1, "driveFileUrl es requerido"),
+  driveFileId: z.string().optional().nullable(),
+  driveFileUrl: z.string().optional().nullable(),
+  paymentMethod: z.string().optional().nullable(),
   observation: z.string().optional(),
 });
 
@@ -90,10 +112,56 @@ export async function POST(
       amount: parsed.data.amount,
       paymentDate: new Date(parsed.data.paymentDate),
       totalInstallments: parsed.data.totalInstallments,
-      driveFileId: parsed.data.driveFileId,
-      driveFileUrl: parsed.data.driveFileUrl,
+      driveFileId: parsed.data.driveFileId ?? null,
+      driveFileUrl: parsed.data.driveFileUrl ?? null,
+      paymentMethod: parsed.data.paymentMethod ?? null,
       observation: parsed.data.observation,
     });
+
+    // Sincronizar ESTADO PAGO en Google Sheets si la boleta quedó pagada
+    if (result.invoice.isPaid) {
+      try {
+        const prisma = getPrismaClient();
+        const clientRow = await prisma.client.findUnique({
+          where: { id: clientId },
+          select: { driveFoldersJson: true, googleConfigJson: true, extractionConfigJson: true },
+        });
+        if (clientRow) {
+          const processingClient: ProcessingClient = {
+            id: clientId,
+            name: "",
+            isActive: true,
+            batchSize: 10,
+            intervalMinutes: 60,
+            driveFoldersJson: (clientRow.driveFoldersJson as ClientDriveFolders | null) ?? null,
+            googleConfigJson: (clientRow.googleConfigJson as ClientGoogleConfig | null) ?? null,
+            extractionConfigJson: (clientRow.extractionConfigJson as Record<string, unknown> | null) ?? null,
+          };
+          const googleConfig = resolveGoogleConfig(processingClient);
+          const sheetName = resolveSheetName(processingClient);
+          const mapping = resolveMapping(processingClient) ?? DEFAULT_MAPPING;
+          if (googleConfig) {
+            const sheetsService = new GoogleSheetsService(googleConfig);
+            await sheetsService.updatePaymentStatus(
+              sheetName,
+              mapping,
+              {
+                boletaNumber: result.invoice.boletaNumber,
+                sourceFileUrl: result.invoice.sourceFileUrl,
+                providerTaxId: result.invoice.providerTaxId,
+              },
+              "Pagado"
+            );
+          }
+        }
+      } catch (sheetsError) {
+        console.warn(
+          `[payments-post] sheets updatePaymentStatus failed invoiceId=${invoiceId}: ${
+            sheetsError instanceof Error ? sheetsError.message : "Unknown error"
+          }`
+        );
+      }
+    }
 
     return NextResponse.json(
       { ok: true, payment: result.payment, invoice: result.invoice },

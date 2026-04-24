@@ -4,6 +4,69 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-04-15 — Fix lógica de deduplicación
+
+### Problema
+El pipeline marcaba como duplicados boletas con **distinto `boletaNumber`** pero **mismo monto y vencimiento**. Caso testigo: dos facturas mensuales de RANKO S.R.L. (0003-00154753 y 0003-00155282) con mismo monto y vencimiento idéntico se marcaban como duplicado, perdiendo la segunda. Además, los duplicados se persistían en DB con `isDuplicate=true` aunque el requerimiento era no guardarlos (solo registro en Sheets para auditoría).
+
+El root cause estaba en `invoice.repository.ts::findDuplicateByBusinessKey`: el `WHERE` de Prisma usaba los 4 campos de la business key como condición obligatoria, pero cuando algún campo venía vacío ("") el query matcheaba contra filas que también tuvieran ese campo vacío, reduciendo el match efectivamente a los 2-3 campos poblados.
+
+### Decisión
+El `boletaNumber` es el identificador primario de una factura — si dos boletas tienen distinto `boletaNumber` son documentos distintos, sin excepción. Cambios:
+
+1. **`WHERE` dinámico**: `findDuplicateByBusinessKey` ahora arma el `WHERE` incluyendo únicamente los campos no vacíos. Si `boletaNumber` está presente queda como condición obligatoria del match.
+2. **Mínimo 2 campos**: para considerar un posible duplicado se requieren ≥ 2 campos presentes en la business key. Con solo 1 campo la heurística es demasiado débil.
+3. **Nueva función `isDuplicateByPriority`** en `src/lib/businessKey.ts` para validar en memoria (dos `BusinessKeyParts`) con la misma regla: boletaNumber distinto → nunca duplicado.
+4. **Duplicados no se persisten**: cuando `isDuplicate === true` el pipeline salta `saveProcessedInvoice`. Se mantiene la inserción en Sheets (columna L = "YES") y el move a Escaneados para auditoría, pero no se crea registro en DB.
+
+### Alternativas descartadas
+- **Mantener el `WHERE` estático y filtrar en código**: menos eficiente y duplicaría la lógica de comparación.
+- **Usar la unique constraint `uq_invoice_business_key` de la DB**: no aplica porque el problema es detectar duplicados *antes* de insertar, no después.
+- **Guardar duplicados con flag `isDuplicate=true`**: descartado por pedido explícito — los duplicados ensucian la DB y las queries de reporte tienen que filtrar el flag en todos lados.
+
+### Impacto
+- Modificado: `src/lib/businessKey.ts` — nueva función `isDuplicateByPriority`
+- Modificado: `src/repositories/invoice.repository.ts` — `findDuplicateByBusinessKey` con `WHERE` dinámico y mínimo 2 condiciones
+- Modificado: `src/jobs/processPendingDocuments.job.ts` — `saveProcessedInvoice` solo para no-duplicados
+- Sin cambios de schema ni migraciones
+
+---
+
+## 2026-04-15 — Solapa Pagos en vista de consorcio
+
+### Problema
+La UI tenía una sola tabla que mezclaba visualización de boletas con estado de pago en una columna chica. Registrar pagos requería subir un recibo (endpoint `/receipt`) y no había forma de registrar pagos masivos ni sin PDF. Además, los medios de pago no eran consistentes ni tenían el banco del consorcio como contexto.
+
+### Decisión
+Separar la vista del consorcio en dos solapas: **Boletas** (sin cambios) y **Pagos** (nueva, inline editable). Los gastos no se pueden modificar desde Pagos y viceversa. El pago se registra inline en la tabla (no modal) y se confirma con GUARDAR en lote. 
+
+Reglas:
+- **Empleados** (`providerType = EMPLEADO`): solo editan fecha de pago — el importe siempre es el monto total (no se permiten pagos parciales a empleados).
+- **Proveedores**: editan fecha + importe (vacío = saldo pendiente completo) + medio de pago (dropdown).
+- **Medios de pago**: `Transferencia [BANCO]`, `Cheque propio [BANCO]` (cuando el consorcio tiene banco configurado), `Descuento`, `Efectivo`. Guardados como texto libre en `Payment.paymentMethod`.
+
+Al guardar, la ruta `POST /api/client/invoices/:id/payments` crea el `Payment`, recalcula `isPaid`/`remainingBalance` y — si la boleta quedó totalmente pagada — actualiza la columna N ("ESTADO PAGO") en Google Sheets a "Pagado". La búsqueda de fila en Sheets usa `sourceFileUrl` como clave primaria, con fallback a `boletaNumber + providerTaxId`.
+
+### Migración expand-contract
+`Payment.driveFileId` y `Payment.driveFileUrl` pasan a opcionales (`String?`) porque los pagos desde la solapa Pagos no requieren adjuntar comprobante. Se agrega `Payment.paymentMethod String?` como texto libre.
+
+### Alternativas descartadas
+- **Enum `PaymentMethod`**: el set de opciones depende del banco del consorcio (dinámico) y textos como "Transferencia [GALICIA]" no caben en un enum. Texto libre con dropdown controlado en UI es más flexible.
+- **Modal por pago**: lento para cargar pagos masivos del mes. La tabla editable + GUARDAR en lote es más eficiente.
+- **Pago parcial a empleados**: descartado por pedido explícito del owner (los sueldos se pagan completos).
+
+### Impacto
+- Migración: `prisma/migrations/20260415000200_payment_optional_drive_add_payment_method`
+- Modificado: `prisma/schema.prisma` — `Payment.driveFileId?`, `driveFileUrl?`, nuevo `paymentMethod`
+- Modificado: `src/repositories/payment.repository.ts` — `CreatePaymentInput` con campos opcionales + `paymentMethod`
+- Modificado: `src/app/api/client/invoices/[id]/payments/route.ts` — schema Zod, sync con Sheets
+- Modificado: `src/app/api/client/consortiums/[id]/invoices/route.ts` — agrega `providerType` al response
+- Modificado: `src/services/googleSheets.service.ts` — nuevo `updatePaymentStatus()`
+- Modificado: `src/app/admin/consortiums/page.tsx` — tabs + componente `PagosView`
+- Modificado: `src/app/admin/consortiums/page.module.css` — estilos tabs + pagos
+
+---
+
 ## 2026-04-15 — Soporte de imágenes JPG/PNG en pipeline
 
 ### Problema

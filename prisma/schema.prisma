@@ -385,8 +385,9 @@ model Payment {
   paymentDate       DateTime
   installmentNumber Int?
   totalInstallments Int?
-  driveFileId       String
-  driveFileUrl      String
+  driveFileId       String?
+  driveFileUrl      String?
+  paymentMethod     String?
   observation       String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

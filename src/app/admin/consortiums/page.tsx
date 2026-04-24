@@ -19,7 +19,7 @@ const TIPOS_GASTO = [
 type Period      = { id: string; year: number; month: number; status: "ACTIVE" | "CLOSED"; };
 type Coeficiente = { id: string; name: string; value: number; };
 type Rubro       = { id: string; name: string; };
-type Consortium  = { id: string; canonicalName: string; rawName: string; cuit: string | null; cutoffDay: number; matchNames: string | null; periods: Period[]; _count: { invoices: number }; };
+type Consortium  = { id: string; canonicalName: string; rawName: string; cuit: string | null; cutoffDay: number; matchNames: string | null; bank: string | null; periods: Period[]; _count: { invoices: number }; };
 type Provider    = { id: string; canonicalName: string; cuit: string | null; paymentAlias: string | null; providerType?: "PROVEEDOR" | "EMPLEADO"; };
 type Invoice     = {
   id: string; boletaNumber: string | null; provider: string | null; providerTaxId: string | null;
@@ -31,6 +31,7 @@ type Invoice     = {
   isPaid: boolean;
   remainingBalance: number | null;
   lspServiceId: string | null;
+  providerType?: "PROVEEDOR" | "EMPLEADO";
 };
 type ScannedData = {
   boletaNumber: string | null; provider: string | null; providerTaxId: string | null;
@@ -327,6 +328,7 @@ export default function ConsortiumsPage() {
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [invoicesError, setInvoicesError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"boletas" | "pagos">("boletas");
   const [providers, setProviders] = useState<Provider[]>([]);
   const [coeficientes, setCoeficientes] = useState<Coeficiente[]>([]);
   const [rubros, setRubros] = useState<Rubro[]>([]);
@@ -512,6 +514,7 @@ export default function ConsortiumsPage() {
 
   const handleSelectConsortium = useCallback(async (c: Consortium) => {
     setSelectedId(c.id); setSelectedConsortium(c);
+    setActiveTab("boletas");
     setInvoices([]); setSearch(""); setCloseSuccess(null); setCloseError(null);
     setEditingMatchNames(false); setMatchNamesMsg(null);
     setMatchNamesValue(c.matchNames ?? "");
@@ -979,6 +982,25 @@ export default function ConsortiumsPage() {
               {closeError && <p className={styles.errorMsg}>{closeError}</p>}
               {invoicesError && <p className={styles.errorMsg}>{invoicesError}</p>}
 
+              <div className={styles.tabBar}>
+                <button
+                  type="button"
+                  className={activeTab === "boletas" ? styles.tabActive : styles.tab}
+                  onClick={() => setActiveTab("boletas")}
+                >
+                  Boletas
+                </button>
+                <button
+                  type="button"
+                  className={activeTab === "pagos" ? styles.tabActive : styles.tab}
+                  onClick={() => setActiveTab("pagos")}
+                >
+                  Pagos
+                </button>
+              </div>
+
+              {activeTab === "boletas" && (
+              <>
               <div className={styles.statsStrip}>
                 <div className={styles.statCard}><span className={styles.statLabel}>Boletas</span><span className={styles.statValue}>{filteredInvoices.length}</span></div>
                 <div className={styles.statCard}><span className={styles.statLabel}>Total período</span><span className={styles.statValue}>{formatAmount(totalAmount)}</span></div>
@@ -1057,6 +1079,18 @@ export default function ConsortiumsPage() {
                     </table>
                   )}
                 </div>
+              )}
+              </>
+              )}
+
+              {activeTab === "pagos" && (
+                <PagosView
+                  invoices={invoices}
+                  consortiumBank={selectedConsortium?.bank ?? null}
+                  onPagoGuardado={() => {
+                    if (selectedId && selectedPeriod) void fetchInvoices(selectedId, selectedPeriod.id);
+                  }}
+                />
               )}
             </>
           )}
@@ -1486,5 +1520,226 @@ export default function ConsortiumsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// PagosView — solapa de pagos con tabla inline editable
+// ────────────────────────────────────────────────────────────────────────────
+
+interface PendingPaymentInput {
+  paymentDate: string;
+  amount: string;
+  paymentMethod: string;
+}
+
+interface PagosViewProps {
+  invoices: Invoice[];
+  consortiumBank: string | null;
+  onPagoGuardado: () => void;
+}
+
+function PagosView({ invoices, consortiumBank, onPagoGuardado }: PagosViewProps) {
+  const [pendingPayments, setPendingPayments] = useState<Record<string, PendingPaymentInput>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const visibleInvoices = invoices.filter((inv) => !inv.isDuplicate);
+
+  const totalPeriodo = visibleInvoices.reduce((sum, inv) => sum + (inv.amount ?? 0), 0);
+  const totalPagado = visibleInvoices.filter((inv) => inv.isPaid).reduce((sum, inv) => sum + (inv.amount ?? 0), 0);
+  const totalImpago = visibleInvoices
+    .filter((inv) => !inv.isPaid)
+    .reduce((sum, inv) => sum + (inv.remainingBalance ?? inv.amount ?? 0), 0);
+
+  const updatePending = (invoiceId: string, field: keyof PendingPaymentInput, value: string) => {
+    setPendingPayments((prev) => {
+      const existing = prev[invoiceId] ?? { paymentDate: todayInputDate(), amount: "", paymentMethod: "" };
+      return { ...prev, [invoiceId]: { ...existing, [field]: value } };
+    });
+  };
+
+  const handleGuardarPagos = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const entries = Object.entries(pendingPayments).filter(([, p]) => p.paymentDate);
+      for (const [invoiceId, pago] of entries) {
+        const inv = visibleInvoices.find((i) => i.id === invoiceId);
+        if (!inv) continue;
+
+        const totalAmount = inv.amount ?? 0;
+        const remainingAmount = inv.remainingBalance ?? totalAmount;
+        const parsedInput = pago.amount ? Number(pago.amount) : NaN;
+
+        const amount = inv.providerType === "EMPLEADO"
+          ? totalAmount
+          : Number.isFinite(parsedInput) && parsedInput > 0
+            ? parsedInput
+            : remainingAmount;
+
+        if (!amount || amount <= 0) continue;
+
+        const res = await fetch(`/api/client/invoices/${invoiceId}/payments`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            amount,
+            paymentDate: pago.paymentDate,
+            paymentMethod: pago.paymentMethod || null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      setPendingPayments({});
+      onPagoGuardado();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al guardar los pagos");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const pendingCount = Object.keys(pendingPayments).length;
+  const totalPendiente = Object.entries(pendingPayments).reduce((sum, [invoiceId, p]) => {
+    const inv = visibleInvoices.find((i) => i.id === invoiceId);
+    if (!inv) return sum;
+    if (inv.providerType === "EMPLEADO") return sum + (inv.amount ?? 0);
+    const parsed = p.amount ? Number(p.amount) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) return sum + parsed;
+    return sum + (inv.remainingBalance ?? inv.amount ?? 0);
+  }, 0);
+
+  return (
+    <>
+      <div className={styles.pagosSummary}>
+        <span>Total del período: {formatAmount(totalPeriodo)}</span>
+        <span>Pagos del mes actual: {formatAmount(totalPagado)}</span>
+        <span className={styles.saldoImpago}>
+          Gastos con saldo impago: {formatAmount(totalImpago)}
+        </span>
+      </div>
+
+      {error && <p className={styles.errorMsg}>{error}</p>}
+
+      <div className={styles.tableWrap}>
+        {visibleInvoices.length === 0 ? (
+          <div className={styles.tableEmpty}>No hay boletas para este período.</div>
+        ) : (
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>PERÍODO GASTO</th>
+                <th>PROVEEDOR</th>
+                <th>COMPROBANTE</th>
+                <th>IMPORTE</th>
+                <th>SALDO</th>
+                <th>FECHA PAGO</th>
+                <th>IMPORTE PAGO</th>
+                <th>MEDIO DE PAGO</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleInvoices.map((inv) => {
+                const pending = pendingPayments[inv.id];
+                const totalAmount = inv.amount ?? 0;
+                const saldo = inv.remainingBalance ?? totalAmount;
+                const isEmpleado = inv.providerType === "EMPLEADO";
+                return (
+                  <tr key={inv.id}>
+                    <td>{formatDate(inv.issueDate)}</td>
+                    <td>{inv.provider ?? "—"}</td>
+                    <td className={styles.tdMono}>{inv.boletaNumber ?? "—"}</td>
+                    <td className={styles.tdAmount}>{formatAmount(totalAmount)}</td>
+                    <td className={styles.tdAmount}>{formatAmount(saldo)}</td>
+
+                    <td>
+                      {inv.isPaid ? (
+                        <span className={styles.badgeOk}>Pagada</span>
+                      ) : (
+                        <input
+                          type="date"
+                          className={styles.formInput}
+                          value={pending?.paymentDate ?? todayInputDate()}
+                          onChange={(e) => updatePending(inv.id, "paymentDate", e.target.value)}
+                        />
+                      )}
+                    </td>
+
+                    <td>
+                      {inv.isPaid ? (
+                        <span>{formatAmount(totalAmount)}</span>
+                      ) : isEmpleado ? (
+                        <span>{formatAmount(totalAmount)}</span>
+                      ) : (
+                        <input
+                          type="number"
+                          className={styles.formInput}
+                          step="0.01"
+                          placeholder={String(saldo)}
+                          value={pending?.amount ?? ""}
+                          onChange={(e) => updatePending(inv.id, "amount", e.target.value)}
+                        />
+                      )}
+                    </td>
+
+                    <td>
+                      {inv.isPaid ? (
+                        <span>—</span>
+                      ) : (
+                        <select
+                          className={styles.formSelect}
+                          value={pending?.paymentMethod ?? ""}
+                          onChange={(e) => updatePending(inv.id, "paymentMethod", e.target.value)}
+                        >
+                          <option value="">—</option>
+                          {consortiumBank && (
+                            <>
+                              <option value={`Transferencia [${consortiumBank}]`}>
+                                Transferencia [{consortiumBank}]
+                              </option>
+                              <option value={`Cheque propio [${consortiumBank}]`}>
+                                Cheque propio [{consortiumBank}]
+                              </option>
+                            </>
+                          )}
+                          <option value="Descuento">Descuento</option>
+                          <option value="Efectivo">Efectivo</option>
+                        </select>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {pendingCount > 0 && (
+        <div className={styles.pagosFooter}>
+          <span>
+            {pendingCount} pago(s) cargado(s) sin guardar: {formatAmount(totalPendiente)}
+          </span>
+          <button
+            type="button"
+            className={styles.ghostBtn}
+            onClick={() => setPendingPayments({})}
+            disabled={saving}
+          >
+            CANCELAR
+          </button>
+          <button
+            type="button"
+            className={styles.btnPrimary}
+            onClick={handleGuardarPagos}
+            disabled={saving}
+          >
+            {saving ? "Guardando..." : "GUARDAR"}
+          </button>
+        </div>
+      )}
+    </>
   );
 }
