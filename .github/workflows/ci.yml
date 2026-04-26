@@ -74,7 +74,7 @@ jobs:
           cd ${{ github.workspace }}
           docker compose build
           docker compose run --rm web npx prisma migrate deploy
-          docker compose up -d
+          docker compose up -d --force-recreate
           docker image prune -f
 
       - name: Wait for healthy (Linux)
