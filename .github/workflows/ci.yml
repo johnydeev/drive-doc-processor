@@ -47,12 +47,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
-          tags: dpp:${{ github.sha }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+          tags: ghcr.io/johnydeev/ia-drive-doc-processor:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -71,11 +78,10 @@ jobs:
 
       - name: Build and restart
         run: |
-          cd ${{ github.workspace }}
-          docker compose -p drive-doc-processor down
-          docker compose -p drive-doc-processor build
+          docker login ghcr.io -u johnydeev -p ${{ secrets.GITHUB_TOKEN }}
+          docker pull ghcr.io/johnydeev/ia-drive-doc-processor:latest
           docker compose -p drive-doc-processor run --rm web npx prisma migrate deploy
-          docker compose -p drive-doc-processor up -d
+          docker compose -p drive-doc-processor up -d --force-recreate
           docker image prune -f
 
       - name: Wait for healthy (Linux)

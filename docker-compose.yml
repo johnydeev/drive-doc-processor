@@ -1,10 +1,7 @@
 services:
   # ── Next.js web server + API ───────────────────────────────────
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: drive-doc-processor:latest
+    image: ghcr.io/johnydeev/ia-drive-doc-processor:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -28,7 +25,7 @@ services:
 
   # ── Scheduler: escanea Drive y crea ProcessingJobs ─────────────
   scheduler:
-    image: drive-doc-processor:latest
+    image: ghcr.io/johnydeev/ia-drive-doc-processor:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -47,7 +44,7 @@ services:
 
   # ── Worker: procesa la cola de jobs ────────────────────────────
   worker:
-    image: drive-doc-processor:latest
+    image: ghcr.io/johnydeev/ia-drive-doc-processor:latest
     restart: unless-stopped
     env_file: .env
     environment:
