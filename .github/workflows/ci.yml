@@ -72,9 +72,10 @@ jobs:
       - name: Build and restart
         run: |
           cd ${{ github.workspace }}
-          docker compose build
-          docker compose run --rm web npx prisma migrate deploy
-          docker compose up -d --force-recreate
+          docker compose -p ia-drive-doc-processor down
+          docker compose -p ia-drive-doc-processor build
+          docker compose -p ia-drive-doc-processor run --rm web npx prisma migrate deploy
+          docker compose -p ia-drive-doc-processor up -d
           docker image prune -f
 
       - name: Wait for healthy (Linux)
@@ -100,7 +101,7 @@ jobs:
           Write-Host "Waiting for web to be healthy..."
           $healthy = $false
           for ($i = 1; $i -le 30; $i++) {
-            $status = docker compose ps web
+            $status = docker compose -p ia-drive-doc-processor ps web
             if ($status -match "healthy") {
               Write-Host "Web is healthy!"
               $healthy = $true
@@ -110,6 +111,6 @@ jobs:
           }
           if (-not $healthy) {
             Write-Host "Web did not become healthy in time"
-            docker compose logs web --tail 20
+            docker compose -p ia-drive-doc-processor logs web --tail 20
             exit 1
           }
