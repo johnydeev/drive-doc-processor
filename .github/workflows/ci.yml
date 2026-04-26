@@ -69,6 +69,7 @@ jobs:
         run: |
           cd ${{ github.workspace }}
           docker compose build
+          docker compose run --rm web npx prisma migrate deploy
           docker compose up -d
           docker image prune -f
 
