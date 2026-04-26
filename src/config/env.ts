@@ -4,8 +4,8 @@ import dotenv from "dotenv";
 // En Next.js esto es un no-op porque las variables ya están cargadas.
 // En los scripts de Node (scheduler, worker) esto garantiza que el .env
 // esté disponible sin depender del orden de imports del llamador.
-dotenv.config({ path: ".env.local" });
-dotenv.config({ path: ".env" });
+dotenv.config({ path: ".env.local" }); 
+dotenv.config({ path: ".env" }); 
 
 export interface EnvConfig {
   GOOGLE_PROJECT_ID: string;
