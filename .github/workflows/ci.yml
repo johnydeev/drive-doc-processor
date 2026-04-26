@@ -73,7 +73,9 @@ jobs:
           docker compose up -d
           docker image prune -f
 
-      - name: Wait for healthy
+      - name: Wait for healthy (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
         run: |
           echo "Waiting for web to be healthy..."
           for i in $(seq 1 30); do
@@ -86,3 +88,24 @@ jobs:
           echo "Web did not become healthy in time"
           docker compose logs web --tail 20
           exit 1
+
+      - name: Wait for healthy (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Write-Host "Waiting for web to be healthy..."
+          $healthy = $false
+          for ($i = 1; $i -le 30; $i++) {
+            $status = docker compose ps web
+            if ($status -match "healthy") {
+              Write-Host "Web is healthy!"
+              $healthy = $true
+              break
+            }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $healthy) {
+            Write-Host "Web did not become healthy in time"
+            docker compose logs web --tail 20
+            exit 1
+          }
