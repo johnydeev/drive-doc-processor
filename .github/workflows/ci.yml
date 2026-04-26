@@ -65,6 +65,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Copy env file
+        shell: cmd
+        run: copy "C:\Users\jony\Desktop\Proyectos Para vender\pdf-drive-procesor\drive-doc-processor\.env" .env
+
       - name: Build and restart
         run: |
           cd ${{ github.workspace }}
