@@ -63,3 +63,19 @@ export const env: EnvConfig = {
   DATABASE_URL: requireEnv("DATABASE_URL"),
   GOOGLE_CREDENTIALS_ENCRYPTION_KEY: optionalEnv("GOOGLE_CREDENTIALS_ENCRYPTION_KEY"),
 };
+
+// En producción, GOOGLE_CREDENTIALS_ENCRYPTION_KEY es obligatoria para cifrado nuevo.
+// No tiramos hard fail al booteo (los secretos legados pueden seguir leyéndose con SESSION_SECRET),
+// pero avisamos fuerte para que el operador la configure y corra el script de migración.
+if (
+  !shouldSkipEnvValidation &&
+  process.env.NODE_ENV === "production" &&
+  !env.GOOGLE_CREDENTIALS_ENCRYPTION_KEY
+) {
+  console.error(
+    "[env] ❌ GOOGLE_CREDENTIALS_ENCRYPTION_KEY no configurada en producción. " +
+    "Los secretos NUEVOS no podrán cifrarse (encrypt() lanzará error). " +
+    "Generá una clave con `openssl rand -hex 32`, configurala y corré " +
+    "`tsx scripts/rotate-encrypted-secrets.ts` para migrar secretos legados."
+  );
+}

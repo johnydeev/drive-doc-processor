@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuthenticatedSession } from "@/lib/adminAuth";
+import { requireClientSession } from "@/lib/clientAuth";
 import { getPrismaClient } from "@/lib/prisma";
 import { GoogleSheetsService } from "@/services/googleSheets.service";
 import { resolveGoogleConfig } from "@/lib/clientProcessingConfig";
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuthenticatedSession(request);
+  const auth = requireClientSession(request);
   if (auth.error) return auth.error;
 
   const clientId = auth.session.clientId;

@@ -4,6 +4,7 @@ import { getPrismaClient } from "@/lib/prisma";
 import { GoogleDriveService } from "@/services/googleDrive.service";
 import { resolveGoogleConfig, resolveFolders } from "@/lib/clientProcessingConfig";
 import { PaymentRepository, PaymentError } from "@/repositories/payment.repository";
+import { isPdf } from "@/lib/fileSignature";
 
 const MONTH_NAMES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -52,6 +53,14 @@ export async function POST(
 
     if (file.type !== "application/pdf") {
       return NextResponse.json({ ok: false, error: "Solo se aceptan archivos PDF" }, { status: 400 });
+    }
+
+    const MAX_RECEIPT_SIZE = 20 * 1024 * 1024; // 20MB
+    if (file.size > MAX_RECEIPT_SIZE) {
+      return NextResponse.json(
+        { ok: false, error: "El comprobante no puede superar 20MB" },
+        { status: 400 }
+      );
     }
 
     // ── Obtener config de Drive del cliente ───────────────────────────────
@@ -110,6 +119,15 @@ export async function POST(
 
     // ── Subir el PDF a Drive ──────────────────────────────────────────────
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    // Magic bytes: confirmar que el contenido es realmente PDF.
+    if (!isPdf(buffer)) {
+      return NextResponse.json(
+        { ok: false, error: "El archivo no es un PDF válido (firma binaria incorrecta)" },
+        { status: 400 }
+      );
+    }
+
     const fileName = file.name || `recibo_${invoiceId}.pdf`;
 
     const uploaded = await driveService.uploadFile(

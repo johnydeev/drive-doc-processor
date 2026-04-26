@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthenticatedSession } from "@/lib/adminAuth";
+import { requireClientSession } from "@/lib/clientAuth";
 import { getPrismaClient } from "@/lib/prisma";
 
 const updateSchema = z.object({
@@ -13,7 +13,7 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAuthenticatedSession(request);
+  const auth = requireClientSession(request);
   if (auth.error) return auth.error;
 
   const { id } = await context.params;
@@ -53,7 +53,7 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAuthenticatedSession(request);
+  const auth = requireClientSession(request);
   if (auth.error) return auth.error;
 
   const { id } = await context.params;

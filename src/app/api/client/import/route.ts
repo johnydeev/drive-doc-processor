@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireClientSession } from "@/lib/clientAuth";
 import { getPrismaClient } from "@/lib/prisma";
+import { isZip } from "@/lib/fileSignature";
 
 /**
  * POST /api/client/import
@@ -30,9 +31,38 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Solo se aceptan archivos .xlsx o .xls" }, { status: 400 });
     }
 
+    const MAX_EXCEL_SIZE = 10 * 1024 * 1024; // 10MB
+    if (file.size > MAX_EXCEL_SIZE) {
+      return NextResponse.json(
+        { ok: false, error: "El archivo Excel no puede superar 10MB" },
+        { status: 400 }
+      );
+    }
+
+    const VALID_EXCEL_MIMES = [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+    ];
+    if (!VALID_EXCEL_MIMES.includes(file.type)) {
+      return NextResponse.json(
+        { ok: false, error: "El archivo debe ser un Excel (.xlsx o .xls)" },
+        { status: 400 }
+      );
+    }
+
     // Importar xlsx dinámicamente para no romper el edge runtime en otros endpoints
     const XLSX = await import("xlsx");
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    // Magic bytes: xlsx es un ZIP/OOXML (PK\x03\x04). Para .xls (formato CFB binario clásico)
+    // no validamos firma — confiamos en MIME + extensión + parseo de XLSX.read.
+    if (ext === "xlsx" && !isZip(buffer)) {
+      return NextResponse.json(
+        { ok: false, error: "El archivo no es un .xlsx válido (firma binaria incorrecta)" },
+        { status: 400 }
+      );
+    }
+
     const workbook = XLSX.read(buffer, { type: "buffer" });
 
     // ── Parsear hoja Edificios ────────────────────────────────────────────

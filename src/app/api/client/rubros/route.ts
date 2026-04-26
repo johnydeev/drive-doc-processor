@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuthenticatedSession } from "@/lib/adminAuth";
+import { requireClientSession } from "@/lib/clientAuth";
 import { getPrismaClient } from "@/lib/prisma";
 
 const createSchema = z.object({
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuthenticatedSession(request);
+  const auth = requireClientSession(request);
   if (auth.error) return auth.error;
 
   try {

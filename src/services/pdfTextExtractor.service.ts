@@ -32,9 +32,7 @@ export class PdfTextExtractorService {
     );
     this.lastHasEmitterBlock = hasEmitterBlock;
 
-    // DIAGNÓSTICO TEMPORAL — remover después
-    console.log(`[pdf-extractor-debug] chars=${directText.length} hasEmitterBlock=${hasEmitterBlock}`);
-    console.log(`[pdf-extractor-debug] texto=\n${directText.slice(0, 500)}`);
+    console.log(`[pdf-extractor] chars=${directText.length} hasEmitterBlock=${hasEmitterBlock}`);
 
     if (hasEnoughText && hasEmitterBlock) {
       return directText;

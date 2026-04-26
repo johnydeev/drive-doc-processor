@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuthenticatedSession } from "@/lib/adminAuth";
+import { requireClientSession } from "@/lib/clientAuth";
 import { getPrismaClient } from "@/lib/prisma";
 import { PdfTextExtractorService } from "@/services/pdfTextExtractor.service";
 import { resolveAiConfig } from "@/lib/clientProcessingConfig";
 import { ClientDriveFolders, ClientGoogleConfig, ProcessingClient } from "@/types/client.types";
 import { normalizeConsortiumName } from "@/lib/consortiumNormalizer";
+import { isPdf, isPng, isJpeg } from "@/lib/fileSignature";
 import { env } from "@/config/env";
 
 /**
@@ -19,7 +20,7 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const auth = requireAuthenticatedSession(request);
+  const auth = requireClientSession(request);
   if (auth.error) return auth.error;
 
   const { id: consortiumId } = await context.params;
@@ -48,12 +49,38 @@ export async function POST(
       return NextResponse.json({ ok: false, error: "Se requiere un archivo PDF" }, { status: 400 });
     }
 
+    const MAX_PDF_SIZE = 15 * 1024 * 1024; // 15MB
+    if (file.size > MAX_PDF_SIZE) {
+      return NextResponse.json(
+        { ok: false, error: "El PDF no puede superar 15MB" },
+        { status: 400 }
+      );
+    }
+
+    const VALID_PDF_MIMES = ["application/pdf", "image/jpeg", "image/png"];
+    if (!VALID_PDF_MIMES.includes(file.type)) {
+      return NextResponse.json(
+        { ok: false, error: "El archivo debe ser PDF, JPG o PNG" },
+        { status: 400 }
+      );
+    }
+
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Extraer texto del PDF
-    const pdfExtractor = new PdfTextExtractorService();
-    const text = await pdfExtractor.extractTextFromPdf(buffer);
+    // Magic bytes: confirmar que el contenido coincide con el MIME declarado.
+    const sigOk =
+      (file.type === "application/pdf" && isPdf(buffer)) ||
+      (file.type === "image/png"       && isPng(buffer)) ||
+      (file.type === "image/jpeg"      && isJpeg(buffer));
+    if (!sigOk) {
+      return NextResponse.json(
+        { ok: false, error: "El contenido del archivo no coincide con su tipo declarado" },
+        { status: 400 }
+      );
+    }
+
+    const isImage = file.type === "image/png" || file.type === "image/jpeg";
 
     // Resolver y descifrar keys de IA
     const clientRow = await prisma.client.findUnique({
@@ -80,23 +107,45 @@ export async function POST(
 
     let extracted: Record<string, unknown> | null = null;
 
-    if (geminiKey) {
+    if (isImage) {
+      // Imagen: solo Gemini Vision puede procesarla. No hay fallback OCR/PDF.
+      if (!geminiKey) {
+        return NextResponse.json({
+          ok: false,
+          error: "Para procesar imágenes (JPG/PNG) se requiere una API key de Gemini configurada",
+        }, { status: 400 });
+      }
       try {
         const { GeminiExtractorService } = await import("@/services/geminiExtractor.service");
         const extractor = new GeminiExtractorService({ apiKey: geminiKey, model: geminiModel });
-        extracted = await extractor.extractStructuredData(text) as unknown as Record<string, unknown>;
+        const imageMime = file.type as "image/jpeg" | "image/png";
+        extracted = await extractor.extractStructuredDataFromImage(buffer, imageMime) as unknown as Record<string, unknown>;
       } catch (err) {
-        console.warn("[scan] Gemini failed:", err instanceof Error ? err.message : err);
+        console.warn("[scan] Gemini Vision failed:", err instanceof Error ? err.message : err);
       }
-    }
+    } else {
+      // PDF: extracción de texto + IA (Gemini → OpenAI fallback).
+      const pdfExtractor = new PdfTextExtractorService();
+      const text = await pdfExtractor.extractTextFromPdf(buffer);
 
-    if (!extracted && openaiKey) {
-      try {
-        const { AiExtractorService } = await import("@/services/aiExtractor.service");
-        const extractor = new AiExtractorService({ apiKey: openaiKey, model: openaiModel });
-        extracted = await extractor.extractStructuredData(text) as unknown as Record<string, unknown>;
-      } catch (err) {
-        console.warn("[scan] OpenAI failed:", err instanceof Error ? err.message : err);
+      if (geminiKey) {
+        try {
+          const { GeminiExtractorService } = await import("@/services/geminiExtractor.service");
+          const extractor = new GeminiExtractorService({ apiKey: geminiKey, model: geminiModel });
+          extracted = await extractor.extractStructuredData(text) as unknown as Record<string, unknown>;
+        } catch (err) {
+          console.warn("[scan] Gemini failed:", err instanceof Error ? err.message : err);
+        }
+      }
+
+      if (!extracted && openaiKey) {
+        try {
+          const { AiExtractorService } = await import("@/services/aiExtractor.service");
+          const extractor = new AiExtractorService({ apiKey: openaiKey, model: openaiModel });
+          extracted = await extractor.extractStructuredData(text) as unknown as Record<string, unknown>;
+        } catch (err) {
+          console.warn("[scan] OpenAI failed:", err instanceof Error ? err.message : err);
+        }
       }
     }
 

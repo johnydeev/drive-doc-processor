@@ -4,6 +4,7 @@ import { identifyLSPProvider, LSPProvider, LSP_FALLBACK_NAMES } from "@/lib/extr
 import { refineExtractionWithRawText } from "@/lib/extraction";
 import { createEmptyTokenUsageSummary } from "@/lib/createEmptyTokenUsageSummary";
 import { pipelineLog } from "@/lib/logger";
+import { safeDebugLog } from "@/lib/debugSanitize";
 import { accumulateTokenUsage } from "@/types/aiUsage.types";
 import { ExtractedDocumentData } from "@/types/extractedDocument.types";
 import { ProcessJobSummary } from "@/types/process.types";
@@ -588,7 +589,7 @@ async function processDriveFile(
       }
 
       if (resolvedConfig.debugMode && extracted) {
-        pipelineLog.stepStart(cid, `[DEBUG-AI] respuesta raw: ${JSON.stringify(extracted)}`);
+        pipelineLog.stepStart(cid, `[DEBUG-AI] respuesta raw (sanitizada): ${safeDebugLog(JSON.stringify(extracted))}`);
       }
     } else if (existingByHash?.extraction) {
       // ── Flujo PDF: duplicado por hash con extracción previa ──
@@ -615,7 +616,7 @@ async function processDriveFile(
         : fullText;
 
       if (resolvedConfig.debugMode) {
-        pipelineLog.stepStart(cid, `[DEBUG-OCR] texto completo (${text.length} chars):\n${text}`);
+        pipelineLog.stepStart(cid, `[DEBUG-OCR] texto (${text.length} chars, sanitizado):\n${safeDebugLog(text)}`);
       }
 
       const providerErrors: string[] = [];
@@ -654,7 +655,7 @@ async function processDriveFile(
       }
 
       if (resolvedConfig.debugMode && extracted) {
-        pipelineLog.stepStart(cid, `[DEBUG-AI] respuesta raw: ${JSON.stringify(extracted)}`);
+        pipelineLog.stepStart(cid, `[DEBUG-AI] respuesta raw (sanitizada): ${safeDebugLog(JSON.stringify(extracted))}`);
       }
     }
 
@@ -873,6 +874,15 @@ export async function processPendingDocumentsJob(
   const processedIds = new Set<string>();
 
   pipelineLog.batchStart(resolvedConfig.clientId, resolvedConfig.clientName, resolvedConfig.drivePendingFolderId ?? "?", files.length);
+
+  if (resolvedConfig.debugMode) {
+    pipelineLog.stepStart(
+      resolvedConfig.clientId,
+      "⚠️  [DEBUG MODE ACTIVO] Los logs incluyen contenido sensible " +
+      "(OCR completo, respuestas IA, CUITs, importes). " +
+      "Desactivar en producción cuando no sea necesario."
+    );
+  }
 
   const summary = createBaseSummary(files.length);
   summary.clientId = resolvedConfig.clientId;

@@ -195,12 +195,14 @@ export const pipelineLog = {
   },
 
   extractionResult(clientId: string, data: { consortium?: string | null; provider?: string | null; providerTaxId?: string | null; amount?: number | null; dueDate?: string | null; allTaxIds?: string[] | null }) {
+    // En modo normal mostramos solo metadatos no sensibles (presencia/ausencia + tamaños).
+    // CUIT, allTaxIds y monto se omiten porque son PII; aparecen sólo en debugMode con sanitización.
     log("info", "job", `  Extraído:`, shortId(clientId));
     log("info", "job", `    Consorcio:  ${data.consortium ?? "null"}`, shortId(clientId));
     log("info", "job", `    Proveedor:  ${data.provider ?? "null"}`, shortId(clientId));
-    log("info", "job", `    CUIT:       ${data.providerTaxId ?? "null"}`, shortId(clientId));
-    log("info", "job", `    CUITs:      ${(data.allTaxIds ?? []).length > 0 ? (data.allTaxIds ?? []).join(", ") : "ninguno"}`, shortId(clientId));
-    log("info", "job", `    Monto:      ${data.amount != null ? `$${data.amount}` : "null"}`, shortId(clientId));
+    log("info", "job", `    CUIT:       ${data.providerTaxId ? "[REDACTADO]" : "null"}`, shortId(clientId));
+    log("info", "job", `    CUITs:      ${(data.allTaxIds ?? []).length > 0 ? `${(data.allTaxIds ?? []).length} encontrado(s) [REDACTADOS]` : "ninguno"}`, shortId(clientId));
+    log("info", "job", `    Monto:      ${data.amount != null ? "[REDACTADO]" : "null"}`, shortId(clientId));
     log("info", "job", `    Vto:        ${data.dueDate ?? "null"}`, shortId(clientId));
   },
 

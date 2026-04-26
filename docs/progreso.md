@@ -12,6 +12,17 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 
 ## Completado ✅
 
+- **Hardening de seguridad** (15/04/2026)
+  - /api/process protegido con autenticación admin (+ alineación OpenAPI)
+  - VIEWER bloqueado en endpoints de escritura y en scan (consume IA/OCR)
+  - Límites de tamaño, MIME y magic bytes en todos los uploads
+  - Cifrado versionado v2: nuevos secretos con GOOGLE_CREDENTIALS_ENCRYPTION_KEY,
+    legado `enc:...` legible probando ambas claves candidatas (GCEK y SESSION_SECRET)
+  - Script idempotente `scripts/rotate-encrypted-secrets.ts` para migración
+  - Sanitización (CUIT/importes/emails/CBU) + truncado en logs de debug mode
+  - Logs normales: PII redactada en extractionResult (CUIT/monto). Diagnóstico
+    de pdf-extractor ya no vuelca los primeros 500 chars del texto
+  - Scan: imágenes JPG/PNG van a Gemini Vision (no a pdf-parse)
 - **Fix lógica de deduplicación** (15/04/2026)
   - `boletaNumber` es campo primario: si es distinto → no es duplicado (aunque monto y vencimiento coincidan)
   - `findDuplicateByBusinessKey` ahora arma `WHERE` dinámico solo con campos presentes y requiere ≥ 2 condiciones

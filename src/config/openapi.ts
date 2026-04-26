@@ -240,9 +240,12 @@ export const openApiSpec = {
     "/api/process": {
       post: {
         tags: ["Process"],
-        summary: "Ejecuta proceso manual sin UI",
+        summary: "Ejecuta proceso manual sin UI (solo ADMIN)",
+        security: [{ cookieAuth: [] }],
         responses: {
           "200": { description: "Proceso ejecutado" },
+          "401": { description: "No autenticado" },
+          "403": { description: "No autorizado (requiere rol ADMIN)" },
           "500": { description: "Error de ejecucion" },
         },
       },

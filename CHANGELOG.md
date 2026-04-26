@@ -2,6 +2,26 @@
 
 ## [Unreleased] - 2026-04-15
 
+### Security
+- Fix crítico: descifrado legacy ahora prueba ambas claves candidatas (GCEK + SESSION_SECRET)
+  con AES-GCM auth-tag check, garantizando lectura de secretos viejos sin importar con cuál
+  se cifraron originalmente
+- Fix alto: removidos logs sin sanitizar — `pdf-extractor` ya no imprime los primeros 500
+  chars del texto, y `extractionResult` redacta CUIT/CUITs/monto en logs normales
+- Fix alto: scan rutea correctamente imágenes JPG/PNG a Gemini Vision en vez de pdf-parse
+- Fix crítico: /api/process ahora requiere sesión de admin autenticada
+- Fix alto: endpoints de escritura usan requireClientSession() — VIEWER no puede mutar datos
+- Fix alto: scan (`POST /api/client/consortiums/[id]/invoices/scan`) usa requireClientSession — VIEWER no puede consumir IA/OCR
+- Fix medio: límites de tamaño en uploads (Excel 10MB, PDF scan 15MB, receipt 20MB) + validación MIME
+- Fix medio: validación de magic bytes en uploads (PDF, PNG, JPG, XLSX/ZIP)
+- Fix medio: cifrado versionado v2 en `enc:v2:...`. Nuevos secretos usan exclusivamente
+  GOOGLE_CREDENTIALS_ENCRYPTION_KEY; el formato legado `enc:...` sigue legible con SESSION_SECRET
+  para compatibilidad. Script de migración: `tsx scripts/rotate-encrypted-secrets.ts [--apply]`
+- Fix medio: validación en producción que avisa si falta GOOGLE_CREDENTIALS_ENCRYPTION_KEY
+- Fix medio: sanitización (CUITs, importes, emails, CBU) + truncado de logs en debug mode
+- Fix bajo: warning en logs cuando debug mode está activo con datos sensibles
+- Fix bajo: OpenAPI documenta /api/process como protegido (cookieAuth)
+
 ### Fixed
 - Fix: `clientNumber` se limpia automáticamente para boletas no-LSP si Gemini alucina un valor (campo reservado exclusivamente para boletas LSP)
 - Fix deduplicación: `boletaNumber` distinto → nunca duplicado, independiente de monto y vencimiento. Caso testigo: dos facturas RANKO S.R.L. con números 0003-00154753 y 0003-00155282 se marcaban como duplicado por compartir monto/período.
