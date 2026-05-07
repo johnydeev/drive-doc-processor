@@ -80,8 +80,8 @@ jobs:
         run: |
           docker login ghcr.io -u johnydeev -p ${{ secrets.GITHUB_TOKEN }}
           docker pull ghcr.io/johnydeev/ia-drive-doc-processor:latest
-          docker compose -p drive-doc-processor run --rm web npx prisma migrate deploy
-          docker compose -p drive-doc-processor up -d --force-recreate
+          docker compose -p ia-drive-doc-processor run --rm web npx prisma migrate deploy
+          docker compose -p ia-drive-doc-processor up -d --force-recreate
           docker image prune -f
 
       - name: Wait for healthy (Linux)
@@ -90,14 +90,14 @@ jobs:
         run: |
           echo "Waiting for web to be healthy..."
           for i in $(seq 1 30); do
-            if docker compose ps web | grep -q "healthy"; then
+            if docker compose -p ia-drive-doc-processor ps web | grep -q "healthy"; then
               echo "Web is healthy!"
               exit 0
             fi
             sleep 5
           done
           echo "Web did not become healthy in time"
-          docker compose logs web --tail 20
+          docker compose -p ia-drive-doc-processor logs web --tail 20
           exit 1
 
       - name: Wait for healthy (Windows)
@@ -107,7 +107,7 @@ jobs:
           Write-Host "Waiting for web to be healthy..."
           $healthy = $false
           for ($i = 1; $i -le 30; $i++) {
-            $status = docker compose -p drive-doc-processor ps web
+            $status = docker compose -p ia-drive-doc-processor ps web
             if ($status -match "healthy") {
               Write-Host "Web is healthy!"
               $healthy = $true
@@ -117,6 +117,6 @@ jobs:
           }
           if (-not $healthy) {
             Write-Host "Web did not become healthy in time"
-            docker compose -p drive-doc-processor logs web --tail 20
+            docker compose -p ia-drive-doc-processor logs web --tail 20
             exit 1
           }
