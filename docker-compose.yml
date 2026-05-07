@@ -1,3 +1,5 @@
+name: ia-drive-doc-processor
+
 services:
   # ── Next.js web server + API ───────────────────────────────────
   web:
