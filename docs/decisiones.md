@@ -4,6 +4,33 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-11 — Resumen del ciclo automático del scheduler
+
+### Problema
+El scheduler automático (`src/jobs/scheduler.ts`) encola jobs directamente sin pasar por `runProcessingCycle`, por lo que nunca emitía el "RESUMEN TOTAL DEL CICLO" que sí se imprime en los flujos manuales (`/api/process` y `/api/admin/scheduler/run`). Operativamente no había forma rápida de saber, mirando los logs, cuántos archivos se encontraron, cuántos se encolaron y cuántos ya estaban en cola en un ciclo dado.
+
+### Decisión
+Agregar un resumen específico para el scheduler automático sin tocar `runProcessingCycle` (cuya semántica de "ciclo de procesamiento manual" es distinta). Cambios:
+
+1. **`schedulerLog.cycleSummary()`** nuevo método en `src/lib/logger.ts` con tres contadores: `totalFound`, `totalQueued`, `totalSkipped`.
+2. **`runOnce()` en `src/jobs/scheduler.ts`** acumula los contadores:
+   - `totalFound += files.length` por cada cliente con archivos pendientes.
+   - `totalQueued += 1` al crear un nuevo `ProcessingJob`.
+   - `totalSkipped += 1` cuando el archivo ya tiene un job `PENDING`/`PROCESSING` (no se cuenta el caso `existingInvoice` porque no es "ya en cola" sino "ya procesado").
+3. **Gate `totalFound >= 1`**: si no se encontró ningún archivo, no se imprime nada — evita ruido en ciclos vacíos que ya tienen su propio log `clientNoPdfs`.
+
+### Alternativas descartadas
+- **Refactorizar el scheduler para reusar `runProcessingCycle`**: cambiaría la arquitectura scheduler-encola → worker-procesa, que es intencional (desacople).
+- **Imprimir el resumen siempre**: ruido innecesario cuando no hay archivos.
+- **Contar `existingInvoice` en `totalSkipped`**: confundiría "ya procesado" (estado terminal) con "ya en cola" (en progreso).
+
+### Impacto
+- Modificado: `src/lib/logger.ts` — método nuevo `schedulerLog.cycleSummary`
+- Modificado: `src/jobs/scheduler.ts` — contadores + emisión condicional en `runOnce`
+- No se tocó: `src/jobs/runProcessingCycle.ts` ni los endpoints `/api/process` ni `/api/admin/scheduler/run`
+
+---
+
 ## 2026-04-15 — Fix lógica de deduplicación
 
 ### Problema

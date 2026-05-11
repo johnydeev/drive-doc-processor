@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Feature: reporte de resumen al final de cada ciclo automático del
+  scheduler, solo cuando se encontró al menos 1 archivo.
+  Muestra encontrados, encolados y ya en cola.
+
 ## [Unreleased] - 2026-04-15
 
 ### Security

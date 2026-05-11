@@ -112,6 +112,15 @@ export const schedulerLog = {
   skippedBusy() {
     log("warn", "scheduler", "Ciclo omitido — el anterior aún está corriendo");
   },
+
+  cycleSummary(summary: { totalFound: number; totalQueued: number; totalSkipped: number }) {
+    miniDivider("scheduler");
+    log("info", "scheduler", `📊 RESUMEN DEL CICLO AUTOMÁTICO`);
+    log("info", "scheduler", `  Encontrados:  ${summary.totalFound}`);
+    log("info", "scheduler", `  Encolados:    ${summary.totalQueued}`);
+    log("info", "scheduler", `  Ya en cola:   ${summary.totalSkipped}`);
+    miniDivider("scheduler");
+  },
 };
 
 // ═══════════════════════════════════════════════════════════════════════════

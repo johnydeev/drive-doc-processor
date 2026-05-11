@@ -38,6 +38,9 @@ const runOnce = async (): Promise<void> => {
     schedulerLog.cycleStart(clients.length);
 
     const now = Date.now();
+    let totalFound = 0;
+    let totalQueued = 0;
+    let totalSkipped = 0;
 
     for (const client of clients) {
       const clientInterval = (client.intervalMinutes > 0 ? client.intervalMinutes : globalMinutes) * 60 * 1000;
@@ -71,6 +74,8 @@ const runOnce = async (): Promise<void> => {
           continue;
         }
 
+        totalFound += files.length;
+
         let created = 0;
         for (const file of files) {
           const existingInvoice = await prisma.invoice.findFirst({
@@ -90,6 +95,7 @@ const runOnce = async (): Promise<void> => {
             select: { id: true },
           });
           if (existingJob) {
+            totalSkipped += 1;
             continue;
           }
 
@@ -103,6 +109,7 @@ const runOnce = async (): Promise<void> => {
           });
 
           created += 1;
+          totalQueued += 1;
 
           if (created >= client.batchSize) {
             schedulerLog.batchLimitReached(client.id, client.name, created, files.length);
@@ -122,6 +129,10 @@ const runOnce = async (): Promise<void> => {
           error instanceof Error ? error.message : "Unknown error"
         );
       }
+    }
+
+    if (totalFound >= 1) {
+      schedulerLog.cycleSummary({ totalFound, totalQueued, totalSkipped });
     }
 
     schedulerLog.cycleEnd();

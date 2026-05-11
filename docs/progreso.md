@@ -12,6 +12,12 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 
 ## Completado ✅
 
+- **Resumen del ciclo automático del scheduler** (11/05/2026)
+  - `schedulerLog.cycleSummary()` nuevo en `src/lib/logger.ts` con Encontrados / Encolados / Ya en cola
+  - `src/jobs/scheduler.ts::runOnce()` acumula `totalFound`, `totalQueued` y `totalSkipped`
+    a lo largo del ciclo y emite el resumen antes de `cycleEnd()` solo cuando `totalFound >= 1`
+  - No afecta al flujo manual (`runProcessingCycle`) ni al log existente "RESUMEN TOTAL DEL CICLO"
+
 - **Hardening de seguridad** (15/04/2026)
   - /api/process protegido con autenticación admin (+ alineación OpenAPI)
   - VIEWER bloqueado en endpoints de escritura y en scan (consume IA/OCR)
