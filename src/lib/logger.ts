@@ -170,6 +170,21 @@ export const workerLog = {
   unhandledError(jobId: string, error: string) {
     log("error", "worker", `Error no manejado en job ${shortId(jobId)}: ${error}`);
   },
+
+  cycleSummary(summary: {
+    processed: number;
+    failed: number;
+    unassigned: number;
+    duplicates: number;
+  }) {
+    miniDivider("worker");
+    log("info", "worker", `📊 RESUMEN DEL CICLO`);
+    log("info", "worker", `  Procesados:   ${summary.processed}`);
+    log("info", "worker", `  Sin asignar:  ${summary.unassigned}`);
+    log("info", "worker", `  Duplicados:   ${summary.duplicates}`);
+    log("info", "worker", `  Fallidos:     ${summary.failed}`);
+    miniDivider("worker");
+  },
 };
 
 // ═══════════════════════════════════════════════════════════════════════════

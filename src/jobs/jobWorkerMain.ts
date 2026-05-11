@@ -119,7 +119,7 @@ async function handleJob(job: {
   attempts: number;
   maxAttempts: number;
   startedAt: Date | null;
-}): Promise<void> {
+}): Promise<ProcessJobSummary | null> {
   const prisma = getPrismaClient();
 
   const clientRow = await prisma.client.findUnique({
@@ -139,7 +139,7 @@ async function handleJob(job: {
   if (!clientRow) {
     workerLog.clientNotFound(job.id, job.clientId);
     await finalizeJob(job.id, job.driveFileName, job.attempts, job.maxAttempts, job.startedAt, false, "Client not found");
-    return;
+    return null;
   }
 
   const client = mapClient(clientRow);
@@ -147,7 +147,7 @@ async function handleJob(job: {
   if (!client.isActive) {
     workerLog.clientInactive(job.id, client.name);
     await finalizeJob(job.id, job.driveFileName, job.attempts, job.maxAttempts, job.startedAt, false, "Client inactive");
-    return;
+    return null;
   }
 
   workerLog.jobClaimed(job.id, job.driveFileId, job.driveFileName, client.name);
@@ -206,20 +206,45 @@ async function handleJob(job: {
       errorMessage: success ? undefined : errorMessage,
     });
   }
+
+  return summary;
 }
 
 async function runWorker(): Promise<void> {
   workerLog.starting();
 
+  let cycleProcessed = 0;
+  let cycleFailed = 0;
+  let cycleUnassigned = 0;
+  let cycleSkipped = 0;
+
   while (true) {
     const job = await claimNextJob();
     if (!job) {
+      if (cycleProcessed + cycleFailed + cycleUnassigned > 0) {
+        workerLog.cycleSummary({
+          processed: cycleProcessed,
+          failed: cycleFailed,
+          unassigned: cycleUnassigned,
+          duplicates: cycleSkipped,
+        });
+        cycleProcessed = 0;
+        cycleFailed = 0;
+        cycleUnassigned = 0;
+        cycleSkipped = 0;
+      }
       await sleep(POLL_INTERVAL_MS);
       continue;
     }
 
     try {
-      await handleJob(job);
+      const summary = await handleJob(job);
+      if (summary) {
+        cycleProcessed += summary.processed ?? 0;
+        cycleFailed += summary.failed ?? 0;
+        cycleUnassigned += summary.unassigned ?? 0;
+        cycleSkipped += summary.duplicatesDetected ?? 0;
+      }
     } catch (error) {
       workerLog.unhandledError(
         job.id,

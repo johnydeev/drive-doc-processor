@@ -18,6 +18,13 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
     a lo largo del ciclo y emite el resumen antes de `cycleEnd()` solo cuando `totalFound >= 1`
   - No afecta al flujo manual (`runProcessingCycle`) ni al log existente "RESUMEN TOTAL DEL CICLO"
 
+- **Resumen agregado en el worker al vaciarse la cola** (11/05/2026)
+  - `workerLog.cycleSummary()` nuevo en `src/lib/logger.ts` con Procesados / Sin asignar / Duplicados / Fallidos
+  - `handleJob()` ahora retorna `ProcessJobSummary | null` para que el loop pueda acumular
+  - `runWorker()` mantiene contadores entre jobs (`cycleProcessed`, `cycleFailed`, `cycleUnassigned`,
+    `cycleSkipped`) y los emite cuando `claimNextJob()` retorna null tras haber procesado ≥ 1 job,
+    reseteando los contadores antes del próximo ciclo
+
 - **Hardening de seguridad** (15/04/2026)
   - /api/process protegido con autenticación admin (+ alineación OpenAPI)
   - VIEWER bloqueado en endpoints de escritura y en scan (consume IA/OCR)

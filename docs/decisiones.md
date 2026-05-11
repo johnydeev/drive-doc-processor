@@ -4,6 +4,33 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-11 — Resumen agregado en el worker al vaciarse la cola
+
+### Problema
+El worker (`src/jobs/jobWorkerMain.ts`) corre un loop infinito de polling cada 2s y procesa jobs uno por uno. No tenía noción de "ciclo": cuando drenaba la cola, simplemente dormía 2s y volvía a buscar, sin emitir ningún resumen agregado. Operativamente no había forma de saber, de un vistazo en los logs, cuántos archivos terminó procesando en una tanda (procesados / sin asignar / duplicados / fallidos) — solo los logs individuales por job (`jobCompleted` / `jobFailed`).
+
+### Decisión
+Aprovechar la transición natural "tenía jobs → ahora cola vacía" como delimitador de ciclo. Cambios:
+
+1. **`workerLog.cycleSummary()`** nuevo en `src/lib/logger.ts` con cuatro contadores: procesados, sin asignar, duplicados, fallidos (mismo orden y formato que `pipelineLog.batchSummary` y `schedulerLog.cycleSummary` para consistencia visual entre procesos).
+2. **`handleJob()` retorna `ProcessJobSummary | null`** en lugar de `void`, para que el loop pueda acumular los contadores reales del summary del pipeline (no inferirlos a partir de success/failure del job).
+3. **`runWorker()` mantiene 4 acumuladores** vivos entre iteraciones del `while (true)`. Solo se acumulan cuando `summary !== null` (es decir, el archivo llegó al pipeline). Los casos `clientNotFound` / `clientInactive` retornan null y no contaminan los contadores del ciclo.
+4. **Gate `cycleProcessed + cycleFailed + cycleUnassigned > 0`**: evita imprimir resumen vacío en el caso degenerado donde solo hubo jobs con summary null (cliente eliminado/inactivo). Los duplicados solos no disparan el resumen porque siempre vienen acompañados de un `processed`.
+5. **Reset post-emisión**: los 4 acumuladores vuelven a 0 antes del `sleep`, listos para el próximo ciclo.
+
+### Alternativas descartadas
+- **Contar jobs (no archivos)**: si un job representara N archivos, perderíamos granularidad. Como cada job procesa exactamente un archivo (`processSingleDriveFileJob`), los números coinciden, pero usar los contadores del `ProcessJobSummary` mantiene la semántica correcta si el pipeline cambia.
+- **Emisión periódica (cada N segundos)**: rompe la lectura del log — un ciclo activo de 3 minutos podría imprimir varios resúmenes parciales del mismo lote.
+- **Persistir el resumen en DB**: ya existe `ProcessingLog` por cliente vía `recordClientRun`. El requerimiento era visibilidad operativa en consola, no un nuevo registro de auditoría.
+- **Contar el caso `summary === null` por excepción**: ese fallo no llegó al pipeline (cliente eliminado/inactivo), no es comparable a un fallo de procesamiento, y contaminaría el contador `failed`.
+
+### Impacto
+- Modificado: `src/lib/logger.ts` — método nuevo `workerLog.cycleSummary`
+- Modificado: `src/jobs/jobWorkerMain.ts` — firma de `handleJob` retorna summary; acumuladores y emisión condicional en `runWorker`
+- No se tocó: `src/jobs/scheduler.ts` ni `src/jobs/runProcessingCycle.ts`
+
+---
+
 ## 2026-05-11 — Resumen del ciclo automático del scheduler
 
 ### Problema

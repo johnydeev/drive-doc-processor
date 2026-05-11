@@ -6,6 +6,9 @@
 - Feature: reporte de resumen al final de cada ciclo automático del
   scheduler, solo cuando se encontró al menos 1 archivo.
   Muestra encontrados, encolados y ya en cola.
+- Feature: resumen de ciclo en worker automático — cuando la cola
+  se vacía después de procesar al menos 1 archivo, emite totales
+  de procesados, sin asignar, duplicados y fallidos.
 
 ## [Unreleased] - 2026-04-15
 
