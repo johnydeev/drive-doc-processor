@@ -22,6 +22,7 @@
         "logs:export": "powershell -ExecutionPolicy Bypass -File .\\scripts\\export-logs.ps1"
     },
     "dependencies": {
+        "@anthropic-ai/sdk": "^0.96.0",
         "@google/generative-ai": "^0.24.1",
         "@napi-rs/canvas": "^0.1.91",
         "@prisma/client": "^6.17.1",

@@ -34,7 +34,7 @@ type CreateClientForm = {
   driveFolderPending: string; driveFolderScanned: string;
   driveFolderUnassigned: string; driveFolderFailed: string; driveFolderReceipts: string;
   sheetsId: string; altaSheetsId: string; sheetName: string;
-  geminiApiKey: string; openaiApiKey: string;
+  geminiApiKey: string; openaiApiKey: string; anthropicApiKey: string;
   googleProjectId: string; googleClientEmail: string; googlePrivateKey: string;
 };
 
@@ -49,7 +49,7 @@ const INITIAL_FORM: CreateClientForm = {
   driveFolderPending: "", driveFolderScanned: "",
   driveFolderUnassigned: "", driveFolderFailed: "", driveFolderReceipts: "",
   sheetsId: "", altaSheetsId: "", sheetName: "Datos",
-  geminiApiKey: "", openaiApiKey: "",
+  geminiApiKey: "", openaiApiKey: "", anthropicApiKey: "",
   googleProjectId: "", googleClientEmail: "", googlePrivateKey: "",
 };
 
@@ -542,6 +542,7 @@ export default function AdminPage() {
                 <div className={styles.formGrid}>
                   <input placeholder="Gemini API Key" value={createForm.geminiApiKey} onChange={set("geminiApiKey")} />
                   <input placeholder="OpenAI API Key" value={createForm.openaiApiKey} onChange={set("openaiApiKey")} />
+                  <input placeholder="Anthropic API Key" value={createForm.anthropicApiKey} onChange={set("anthropicApiKey")} />
                 </div>
                 <p className={styles.formSectionLabel}>Credenciales Google Service Account</p>
                 <div className={styles.formGrid}>

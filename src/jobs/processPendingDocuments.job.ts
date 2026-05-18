@@ -33,6 +33,8 @@ export interface ProcessJobConfig {
     geminiModel?: string;
     openaiApiKey?: string;
     openaiModel?: string;
+    anthropicApiKey?: string;
+    anthropicModel?: string;
   } | null;
   debugMode?: boolean;
 }
@@ -46,6 +48,7 @@ export interface ProcessDriveFileInput {
 
 type GeminiModule = typeof import("@/services/geminiExtractor.service");
 type OpenAiModule = typeof import("@/services/aiExtractor.service");
+type ClaudeModule = typeof import("@/services/claudeExtractor.service");
 
 type ProcessingContext = {
   resolvedConfig: ProcessJobConfig;
@@ -58,10 +61,13 @@ type ProcessingContext = {
   providerRepository: ProviderRepository;
   geminiModule: GeminiModule | null;
   openAiModule: OpenAiModule | null;
+  claudeModule: ClaudeModule | null;
   geminiApiKey?: string;
   openaiApiKey?: string;
+  anthropicApiKey?: string;
   geminiModel?: string;
   openaiModel?: string;
+  anthropicModel?: string;
   existingDuplicateKeys: Set<string>;
 };
 
@@ -161,10 +167,13 @@ async function createProcessingContext(
   const providerRepository = new ProviderRepository();
   const geminiApiKey = config.aiConfig?.geminiApiKey?.trim() || env.GEMINI_API_KEY?.trim();
   const openaiApiKey = config.aiConfig?.openaiApiKey?.trim() || env.OPENAI_API_KEY?.trim();
+  const anthropicApiKey = config.aiConfig?.anthropicApiKey?.trim() || env.ANTHROPIC_API_KEY?.trim();
   const geminiModel = config.aiConfig?.geminiModel?.trim() || env.GEMINI_MODEL;
   const openaiModel = config.aiConfig?.openaiModel?.trim() || env.OPENAI_MODEL;
+  const anthropicModel = config.aiConfig?.anthropicModel?.trim() || env.ANTHROPIC_MODEL;
   const geminiModule = geminiApiKey ? await import("@/services/geminiExtractor.service") : null;
   const openAiModule = openaiApiKey ? await import("@/services/aiExtractor.service") : null;
+  const claudeModule = anthropicApiKey ? await import("@/services/claudeExtractor.service") : null;
 
   let existingDuplicateKeys = new Set<string>();
   try {
@@ -176,7 +185,9 @@ async function createProcessingContext(
   return {
     resolvedConfig: config, resolvedMapping: mapping, driveService, pdfExtractor,
     sheetsService, invoiceRepository, consortiumRepository, providerRepository,
-    geminiModule, openAiModule, geminiApiKey, openaiApiKey, geminiModel, openaiModel,
+    geminiModule, openAiModule, claudeModule,
+    geminiApiKey, openaiApiKey, anthropicApiKey,
+    geminiModel, openaiModel, anthropicModel,
     existingDuplicateKeys,
   };
 }
@@ -506,7 +517,9 @@ async function processDriveFile(
   const {
     resolvedConfig, resolvedMapping, driveService, pdfExtractor, sheetsService,
     invoiceRepository, consortiumRepository, providerRepository,
-    geminiModule, openAiModule, geminiApiKey, openaiApiKey, geminiModel, openaiModel,
+    geminiModule, openAiModule, claudeModule,
+    geminiApiKey, openaiApiKey, anthropicApiKey,
+    geminiModel, openaiModel, anthropicModel,
     existingDuplicateKeys,
   } = context;
 
@@ -646,6 +659,20 @@ async function processDriveFile(
           const msg = error instanceof Error ? error.message : "OpenAI unknown error";
           providerErrors.push(msg);
           pipelineLog.aiExtraction(cid, "openai", false, msg);
+        }
+      }
+
+      if (extracted === null && claudeModule) {
+        try {
+          const extractor = new claudeModule.ClaudeExtractorService({ apiKey: anthropicApiKey, model: anthropicModel });
+          extracted = await runStep("Extracción IA (Claude)", () => extractor.extractStructuredData(text));
+          fileAiUsage = extractor.getLastUsage?.() ?? null;
+          accumulateTokenUsage(summary.tokenUsage, fileAiUsage);
+          pipelineLog.aiExtraction(cid, "anthropic", true);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : "Claude unknown error";
+          providerErrors.push(msg);
+          pipelineLog.aiExtraction(cid, "anthropic", false, msg);
         }
       }
 

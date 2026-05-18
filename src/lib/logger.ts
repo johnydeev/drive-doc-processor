@@ -206,7 +206,7 @@ export const pipelineLog = {
     log("info", "job", `  Hash: ${hash.slice(0, 12)}... — ${status}`, shortId(clientId));
   },
 
-  aiExtraction(clientId: string, provider: "gemini" | "openai", success: boolean, error?: string) {
+  aiExtraction(clientId: string, provider: "gemini" | "openai" | "anthropic", success: boolean, error?: string) {
     if (success) {
       log("success", "job", `  IA: ${provider.toUpperCase()} extrajo datos correctamente`, shortId(clientId));
     } else {

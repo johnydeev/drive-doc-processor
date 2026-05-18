@@ -1,6 +1,6 @@
 # Progreso del proyecto — drive-doc-processor
 
-Actualizado al 04/04/2026 (sesión 23).
+Actualizado al 18/05/2026 (sesión 24).
 
 ---
 
@@ -8,9 +8,48 @@ Actualizado al 04/04/2026 (sesión 23).
 
 El sistema core está funcionando en producción. Pipeline de PDFs, extracción IA, matching y envío a Sheets completo. Se dockerizó el proyecto con 3 servicios separados (web, scheduler, worker), CI/CD con GitHub Actions, y Cloudflare Tunnel integrado.
 
+La cadena de extracción IA ahora soporta tres proveedores: **Gemini → OpenAI → Claude**, con fallback final a OCR_ONLY.
+
 ---
 
 ## Completado ✅
+
+- **Claude (Anthropic) como tercer proveedor de IA** (18/05/2026)
+  - Dependencia: `@anthropic-ai/sdk` instalada.
+  - Nuevo servicio `ClaudeExtractorService` en `src/services/claudeExtractor.service.ts`
+    espejo de `AiExtractorService` (OpenAI). Usa `messages.create` con
+    `max_tokens: 1024`, `temperature: 0`, comparte `buildExtractionPrompt` y
+    `refineExtractionWithRawText`.
+  - Cadena de fallback en `processPendingDocuments.job.ts`: Gemini → OpenAI →
+    **Claude** → OCR_ONLY. Mismo patrón replicado en
+    `/api/client/consortiums/[id]/invoices/scan/route.ts` para el flujo manual.
+  - `env.ts`: agregadas `ANTHROPIC_API_KEY` y `ANTHROPIC_MODEL` opcionales
+    (default `claude-haiku-4-5-20251001`).
+  - `ClientExtractionConfig` admite `anthropicApiKey` y `anthropicModel`
+    (sin cambios de schema — `extractionConfigJson` es JSON libre).
+  - `resolveAiConfig` desencripta la key igual que Gemini/OpenAI y la
+    retorna junto con su modelo. La guarda de retorno null considera los
+    seis campos (Gemini, OpenAI, Anthropic — key + modelo cada uno).
+  - `AiProvider` extendido a `"gemini" | "openai" | "anthropic"`;
+    `pipelineLog.aiExtraction` acepta el nuevo provider.
+  - `ProcessingContext` propaga `claudeModule`, `anthropicApiKey` y
+    `anthropicModel`.
+
+- **`anthropicApiKey` configurable desde la UI admin** (18/05/2026)
+  - `GET /api/admin/clients/[id]` retorna `hasAnthropicApiKey: boolean` para
+    indicar si la key ya está configurada (sin exponer el valor).
+  - `PATCH /api/admin/clients/[id]`: `patchSchema` valida con
+    `z.string().min(10).optional().nullable()`; el bloque de merge encripta
+    con `encrypt()` si viene valor, o `delete extraction.anthropicApiKey`
+    si es null/empty.
+  - `POST /api/admin/clients` (alta): `bodySchema` admite `anthropicApiKey`
+    con el mismo refine de longitud ≥ 10; se encripta al armar
+    `extractionConfigJson`.
+  - `/admin/clients/[id]/page.tsx`: nuevo input en sección "Claves de IA"
+    con placeholder dinámico ("Configurado — dejalo vacío para no cambiar"
+    si `hasAnthropicApiKey`).
+  - `/admin/page.tsx`: nuevo input "Anthropic API Key" en el formulario de
+    alta de cliente, junto a Gemini y OpenAI.
 
 - **CI: tag de imagen Docker con SHA del commit** (17/05/2026)
   - `.github/workflows/ci.yml` (step "Build and push image") ahora produce dos

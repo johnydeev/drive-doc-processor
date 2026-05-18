@@ -104,6 +104,8 @@ export async function POST(
     const openaiKey   = aiConfig?.openaiApiKey  || env.OPENAI_API_KEY?.trim();
     const geminiModel = aiConfig?.geminiModel   || env.GEMINI_MODEL;
     const openaiModel = aiConfig?.openaiModel   || env.OPENAI_MODEL;
+    const anthropicKey   = aiConfig?.anthropicApiKey  || env.ANTHROPIC_API_KEY?.trim();
+    const anthropicModel = aiConfig?.anthropicModel   || env.ANTHROPIC_MODEL;
 
     let extracted: Record<string, unknown> | null = null;
 
@@ -145,6 +147,16 @@ export async function POST(
           extracted = await extractor.extractStructuredData(text) as unknown as Record<string, unknown>;
         } catch (err) {
           console.warn("[scan] OpenAI failed:", err instanceof Error ? err.message : err);
+        }
+      }
+
+      if (!extracted && anthropicKey) {
+        try {
+          const { ClaudeExtractorService } = await import("@/services/claudeExtractor.service");
+          const extractor = new ClaudeExtractorService({ apiKey: anthropicKey, model: anthropicModel });
+          extracted = await extractor.extractStructuredData(text) as unknown as Record<string, unknown>;
+        } catch (err) {
+          console.warn("[scan] Claude failed:", err instanceof Error ? err.message : err);
         }
       }
     }

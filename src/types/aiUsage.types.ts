@@ -1,4 +1,4 @@
-export type AiProvider = "gemini" | "openai";
+export type AiProvider = "gemini" | "openai" | "anthropic";
 
 export interface AiUsageMetrics {
   provider: AiProvider;

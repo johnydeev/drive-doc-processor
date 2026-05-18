@@ -74,6 +74,8 @@ export function resolveAiConfig(client: ProcessingClient): {
   geminiModel?: string;
   openaiApiKey?: string;
   openaiModel?: string;
+  anthropicApiKey?: string;
+  anthropicModel?: string;
 } | null {
   const raw = client.extractionConfigJson;
   if (!raw || typeof raw !== "object") {
@@ -83,17 +85,20 @@ export function resolveAiConfig(client: ProcessingClient): {
   // Las API keys se guardan cifradas — hay que descifrarlas antes de usarlas
   const geminiApiKeyRaw = asOptionalString(raw.geminiApiKey);
   const openaiApiKeyRaw = asOptionalString(raw.openaiApiKey);
+  const anthropicApiKeyRaw = asOptionalString(raw.anthropicApiKey);
   const geminiModel = asOptionalString(raw.geminiModel);
   const openaiModel = asOptionalString(raw.openaiModel);
+  const anthropicModel = asOptionalString(raw.anthropicModel);
 
   const geminiApiKey = geminiApiKeyRaw ? decrypt(geminiApiKeyRaw) : undefined;
   const openaiApiKey = openaiApiKeyRaw ? decrypt(openaiApiKeyRaw) : undefined;
+  const anthropicApiKey = anthropicApiKeyRaw ? decrypt(anthropicApiKeyRaw) : undefined;
 
-  if (!geminiApiKey && !openaiApiKey && !geminiModel && !openaiModel) {
+  if (!geminiApiKey && !openaiApiKey && !anthropicApiKey && !geminiModel && !openaiModel && !anthropicModel) {
     return null;
   }
 
-  return { geminiApiKey, geminiModel, openaiApiKey, openaiModel };
+  return { geminiApiKey, geminiModel, openaiApiKey, openaiModel, anthropicApiKey, anthropicModel };
 }
 
 export interface ResolvedFolders {

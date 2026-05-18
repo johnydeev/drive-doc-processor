@@ -47,6 +47,7 @@ export async function GET(
       hasPrivateKey: Boolean(google.privateKey),
       hasGeminiApiKey: Boolean(extraction.geminiApiKey),
       hasOpenaiApiKey: Boolean(extraction.openaiApiKey),
+      hasAnthropicApiKey: Boolean(extraction.anthropicApiKey),
     },
   });
 }
@@ -70,6 +71,7 @@ const patchSchema = z.object({
   driveFolderReceipts: z.string().optional().nullable(),
   geminiApiKey: z.string().min(10).optional().nullable(),
   openaiApiKey: z.string().min(10).optional().nullable(),
+  anthropicApiKey: z.string().min(10).optional().nullable(),
 });
 
 export async function PATCH(
@@ -114,6 +116,10 @@ export async function PATCH(
     if (body.openaiApiKey !== undefined) {
       if (body.openaiApiKey) extraction.openaiApiKey = encrypt(body.openaiApiKey);
       else delete extraction.openaiApiKey;
+    }
+    if (body.anthropicApiKey !== undefined) {
+      if (body.anthropicApiKey) extraction.anthropicApiKey = encrypt(body.anthropicApiKey);
+      else delete extraction.anthropicApiKey;
     }
 
     // Merge drive folders

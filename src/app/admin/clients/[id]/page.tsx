@@ -28,6 +28,7 @@ type ClientConfig = {
   hasPrivateKey: boolean;
   hasGeminiApiKey: boolean;
   hasOpenaiApiKey: boolean;
+  hasAnthropicApiKey: boolean;
 };
 
 type FormState = {
@@ -48,6 +49,7 @@ type FormState = {
   driveFolderReceipts: string;
   geminiApiKey: string;
   openaiApiKey: string;
+  anthropicApiKey: string;
 };
 
 export default function EditClientPage() {
@@ -80,6 +82,7 @@ export default function EditClientPage() {
     driveFolderReceipts: "",
     geminiApiKey: "",
     openaiApiKey: "",
+    anthropicApiKey: "",
   });
 
   useEffect(() => {
@@ -119,6 +122,7 @@ export default function EditClientPage() {
         driveFolderReceipts: data.client.driveFolderReceipts,
         geminiApiKey: "",
         openaiApiKey: "",
+        anthropicApiKey: "",
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar el cliente");
@@ -155,6 +159,7 @@ export default function EditClientPage() {
       if (form.googlePrivateKey.trim()) payload.googlePrivateKey = form.googlePrivateKey.trim();
       if (form.geminiApiKey.trim()) payload.geminiApiKey = form.geminiApiKey.trim();
       if (form.openaiApiKey.trim()) payload.openaiApiKey = form.openaiApiKey.trim();
+      if (form.anthropicApiKey.trim()) payload.anthropicApiKey = form.anthropicApiKey.trim();
 
       const res = await guardedFetch(`/api/admin/clients/${clientId}`, {
         method: "PATCH",
@@ -368,6 +373,18 @@ export default function EditClientPage() {
                     placeholder={config.hasOpenaiApiKey ? "Configurado — dejalo vacío para no cambiar" : "sk-..."}
                   />
                   {config.hasOpenaiApiKey && !form.openaiApiKey && (
+                    <span className={styles.configuredHint}>Clave configurada</span>
+                  )}
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.fieldLabel}>Anthropic API Key</label>
+                  <input
+                    className={styles.input}
+                    value={form.anthropicApiKey}
+                    onChange={set("anthropicApiKey")}
+                    placeholder={config.hasAnthropicApiKey ? "Configurado — dejalo vacío para no cambiar" : "sk-ant-..."}
+                  />
+                  {config.hasAnthropicApiKey && !form.anthropicApiKey && (
                     <span className={styles.configuredHint}>Clave configurada</span>
                   )}
                 </div>

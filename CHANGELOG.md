@@ -3,6 +3,29 @@
 ## [Unreleased]
 
 ### Added
+- Feature: soporte para Claude (Anthropic) como tercer proveedor de IA en la
+  cadena de extracción. La cascada queda **Gemini → OpenAI → Claude** antes
+  del fallback final a OCR_ONLY. Se aplica tanto en el pipeline automático
+  (`processPendingDocuments.job.ts`) como en el endpoint de scan manual
+  (`/api/client/consortiums/[id]/invoices/scan`).
+  - Nuevo `ClaudeExtractorService` (`src/services/claudeExtractor.service.ts`)
+    usando `@anthropic-ai/sdk` con `messages.create`, espejo del patrón de
+    `AiExtractorService` (OpenAI): mismos prompts via `buildExtractionPrompt`
+    y refinamiento posterior con `refineExtractionWithRawText`.
+  - Tracking de tokens con `provider: "anthropic"` en `AiUsageMetrics`
+    (`AiProvider` extendido a `"gemini" | "openai" | "anthropic"`).
+  - Variables de entorno opcionales: `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`
+    (default `claude-haiku-4-5-20251001`).
+  - `resolveAiConfig` desencripta `anthropicApiKey` por cliente igual que
+    Gemini/OpenAI; `extractionConfigJson` admite `anthropicApiKey`/
+    `anthropicModel` sin cambios de schema (JSON libre).
+- Feature: `anthropicApiKey` configurable desde la UI admin (alta y edición
+  de cliente), siguiendo el mismo patrón que `geminiApiKey`/`openaiApiKey`.
+  - `GET /api/admin/clients/[id]` retorna `hasAnthropicApiKey`.
+  - `PATCH /api/admin/clients/[id]` y `POST /api/admin/clients` validan y
+    encriptan la key con `encrypt()` antes de persistir.
+  - Inputs nuevos en `/admin/clients/[id]` (sección "Claves de IA") y en
+    `/admin` (formulario de alta de cliente).
 - CI: la imagen de Docker en `ghcr.io/johnydeev/ia-drive-doc-processor` ahora
   se tagea con `:latest` y con `${{ github.sha }}` en cada push a master,
   habilitando rollbacks a versiones anteriores por SHA.

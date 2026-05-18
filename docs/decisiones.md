@@ -4,6 +4,78 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-18 — Claude (Anthropic) como tercer proveedor de IA en la cadena de extracción
+
+### Problema
+La extracción IA dependía de dos proveedores (Gemini → OpenAI). Cuando ambos
+fallaban (rate limit simultáneo, error 5xx del lado del proveedor, key inválida
+o quota agotada), el pipeline caía a `buildOcrOnlyPayload()` y la boleta
+terminaba en "Sin Asignar". Sin un tercer proveedor independiente, cada
+incidente en Gemini u OpenAI se traducía 1-a-1 en boletas no procesadas que
+había que reintentar manualmente.
+
+### Decisión
+Sumar **Claude (Anthropic)** como tercer eslabón de fallback, manteniendo el
+orden por costo/latencia: **Gemini → OpenAI → Claude → OCR_ONLY**. Anthropic
+es independiente de Google (Gemini) y Microsoft/OpenAI, lo que reduce la
+probabilidad de fallo simultáneo de los tres.
+
+Patrón de implementación: espejar exactamente `AiExtractorService` (OpenAI).
+Mismo prompt (`buildExtractionPrompt`), mismo refinamiento posterior
+(`refineExtractionWithRawText`), mismo tracking de tokens
+(`AiUsageMetrics`/`accumulateTokenUsage`) — solo cambia el SDK
+(`@anthropic-ai/sdk` con `messages.create`) y el provider tag
+(`"anthropic"`). Esto garantiza que la salida sea intercambiable con los
+otros dos proveedores y que la deduplicación, canonización y matching
+posteriores no necesiten ramas especiales por proveedor.
+
+La key se configura por cliente vía `extractionConfigJson.anthropicApiKey`
+(encriptada con `encrypt()`, igual que `geminiApiKey`/`openaiApiKey`), con
+fallback a `env.ANTHROPIC_API_KEY` para el modo legacy. El modelo default
+es `claude-haiku-4-5-20251001` (haiku 4.5, el más barato y rápido de la
+familia Claude 4.x, alineado al uso "extracción simple, latencia baja").
+
+### Alternativas descartadas
+- **Anthropic primero, OpenAI último.** Descartado: Gemini sigue siendo el
+  más barato por token y el primer eslabón natural. Reordenar habría
+  encarecido el costo promedio sin ganancia funcional clara.
+- **Wrapper genérico tipo "LLM router" (LiteLLM, Vercel AI SDK, etc.).**
+  Descartado: agrega una abstracción extra que no resuelve un problema
+  real en este pipeline (solo tres proveedores, mismo prompt, misma
+  respuesta JSON). El patrón actual de tres servicios espejo es trivial
+  de mantener y deja explícito qué SDK se usa en cada eslabón.
+- **Reintentar Gemini/OpenAI con backoff antes de saltar al siguiente.**
+  Descartado por ahora: cuando un proveedor responde con quota exceeded o
+  con auth fail, reintentar no ayuda. El backoff se podría agregar más
+  adelante si en producción aparecen errores transitorios recuperables.
+
+### Impacto
+- Archivos nuevos:
+  - `src/services/claudeExtractor.service.ts` (servicio espejo de
+    `AiExtractorService`).
+- Archivos modificados:
+  - `src/config/env.ts` — `ANTHROPIC_API_KEY` y `ANTHROPIC_MODEL` opcionales.
+  - `src/types/client.types.ts` — `ClientExtractionConfig.anthropicApiKey`
+    y `anthropicModel`.
+  - `src/types/aiUsage.types.ts` — `AiProvider` extendido a `"anthropic"`.
+  - `src/lib/clientProcessingConfig.ts` — `resolveAiConfig` desencripta
+    y retorna la key/modelo de Anthropic.
+  - `src/lib/logger.ts` — `pipelineLog.aiExtraction` admite `"anthropic"`.
+  - `src/jobs/processPendingDocuments.job.ts` — tercer eslabón de fallback
+    en el flujo PDF; `ProcessJobConfig.aiConfig` y `ProcessingContext`
+    extendidos con `anthropicApiKey`/`anthropicModel`/`claudeModule`.
+  - `src/app/api/client/consortiums/[id]/invoices/scan/route.ts` —
+    tercer fallback en el scan manual.
+  - `src/app/api/admin/clients/route.ts` (POST alta) y
+    `src/app/api/admin/clients/[id]/route.ts` (GET/PATCH edición) —
+    validación, encriptación y flag `hasAnthropicApiKey`.
+  - `src/app/admin/clients/[id]/page.tsx` y `src/app/admin/page.tsx` —
+    inputs nuevos en la UI.
+- Sin cambios de schema Prisma: `extractionConfigJson` es JSON libre.
+- Verificado con `npx tsc --noEmit` y `npm run build:jobs` en limpio.
+
+---
+
 ## 2026-05-17 — Tag de imagen Docker con SHA del commit para rollbacks
 
 ### Problema

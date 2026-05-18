@@ -13,6 +13,8 @@ export interface ClientExtractionConfig {
   openaiApiKey?: string;
   geminiModel?: string;
   openaiModel?: string;
+  anthropicApiKey?: string;
+  anthropicModel?: string;
   [key: string]: unknown;
 }
 

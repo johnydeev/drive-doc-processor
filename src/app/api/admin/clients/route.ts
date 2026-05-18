@@ -27,6 +27,9 @@ const bodySchema = z
     openaiApiKey: z
       .string().trim().optional()
       .refine((v) => !v || v.length >= 10, "openaiApiKey debe tener al menos 10 caracteres"),
+    anthropicApiKey: z
+      .string().trim().optional()
+      .refine((v) => !v || v.length >= 10, "anthropicApiKey debe tener al menos 10 caracteres"),
     googleProjectId: z.string().min(2).optional(),
     googleClientEmail: z.string().email().optional(),
     googlePrivateKey: z.string().min(50).optional(),
@@ -84,6 +87,7 @@ export async function POST(request: Request) {
     // Las API keys de IA se encriptan igual que la private key de Google
     const geminiApiKey = body.geminiApiKey?.trim();
     const openaiApiKey = body.openaiApiKey?.trim();
+    const anthropicApiKey = body.anthropicApiKey?.trim();
 
     const client = await prisma.$transaction(async (tx) => {
       const created = await tx.client.create({
@@ -105,6 +109,7 @@ export async function POST(request: Request) {
             sheetName: body.sheetName?.trim() || env.GOOGLE_SHEETS_SHEET_NAME,
             ...(geminiApiKey ? { geminiApiKey: encrypt(geminiApiKey) } : {}),
             ...(openaiApiKey ? { openaiApiKey: encrypt(openaiApiKey) } : {}),
+            ...(anthropicApiKey ? { anthropicApiKey: encrypt(anthropicApiKey) } : {}),
           } as Prisma.InputJsonValue,
         },
         select: {

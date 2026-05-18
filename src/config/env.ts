@@ -20,6 +20,8 @@ export interface EnvConfig {
   OPENAI_MODEL?: string;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
+  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_MODEL?: string;
   SESSION_SECRET: string;
   DATABASE_URL: string;
   GOOGLE_CREDENTIALS_ENCRYPTION_KEY?: string;
@@ -59,6 +61,8 @@ export const env: EnvConfig = {
   OPENAI_MODEL: optionalEnv("OPENAI_MODEL"),
   GEMINI_API_KEY: optionalEnv("GEMINI_API_KEY"),
   GEMINI_MODEL: optionalEnv("GEMINI_MODEL"),
+  ANTHROPIC_API_KEY: optionalEnv("ANTHROPIC_API_KEY"),
+  ANTHROPIC_MODEL: optionalEnv("ANTHROPIC_MODEL"),
   SESSION_SECRET: requireEnv("SESSION_SECRET"),
   DATABASE_URL: requireEnv("DATABASE_URL"),
   GOOGLE_CREDENTIALS_ENCRYPTION_KEY: optionalEnv("GOOGLE_CREDENTIALS_ENCRYPTION_KEY"),
