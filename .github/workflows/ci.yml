@@ -79,9 +79,12 @@ jobs:
         run: copy "C:\Users\jony\Desktop\Proyectos Para vender\pdf-drive-procesor\drive-doc-processor\.env" .env
 
       - name: Build and restart
+        env:
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           docker login ghcr.io -u johnydeev -p ${{ secrets.GITHUB_TOKEN }}
-          docker pull ghcr.io/johnydeev/ia-drive-doc-processor:latest
+          docker pull ghcr.io/johnydeev/ia-drive-doc-processor:${{ github.sha }}
+          docker tag ghcr.io/johnydeev/ia-drive-doc-processor:${{ github.sha }} ghcr.io/johnydeev/ia-drive-doc-processor:latest
           docker compose -p ia-drive-doc-processor run --rm web npx prisma migrate deploy
           docker compose -p ia-drive-doc-processor up -d --force-recreate
           docker image prune -f

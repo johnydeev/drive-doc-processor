@@ -3,7 +3,7 @@ name: ia-drive-doc-processor
 services:
   # ── Next.js web server + API ───────────────────────────────────
   web:
-    image: ghcr.io/johnydeev/ia-drive-doc-processor:latest
+    image: ghcr.io/johnydeev/ia-drive-doc-processor:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -27,7 +27,7 @@ services:
 
   # ── Scheduler: escanea Drive y crea ProcessingJobs ─────────────
   scheduler:
-    image: ghcr.io/johnydeev/ia-drive-doc-processor:latest
+    image: ghcr.io/johnydeev/ia-drive-doc-processor:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -46,7 +46,7 @@ services:
 
   # ── Worker: procesa la cola de jobs ────────────────────────────
   worker:
-    image: ghcr.io/johnydeev/ia-drive-doc-processor:latest
+    image: ghcr.io/johnydeev/ia-drive-doc-processor:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: .env
     environment:

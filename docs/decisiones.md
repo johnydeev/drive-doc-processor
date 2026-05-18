@@ -4,6 +4,82 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-18 — Pin de imagen Docker por SHA en deploy (en vez de `:latest`)
+
+### Problema
+Después de mergear el commit `d33ff62` (soporte Claude), el job `deploy` del
+CI corrió a éxito (Lint+Build+Deploy todos verdes en 14m 19s) y el step
+`Build and restart` aparentemente ejecutó `docker pull ...:latest` +
+`docker compose up -d --force-recreate`. Sin embargo, en producción el
+contenedor `web-1` siguió corriendo la imagen `sha256:c8cc3d4b...` creada
+el **7 de mayo**, con bundle de Next que **no contenía** el JSX nuevo del
+input "Anthropic API Key". `docker image inspect ghcr.io/.../...:latest`
+en el host también mostraba el SHA viejo con `Created: 2026-05-07`,
+pese a que en GHCR el tag `:latest` apuntaba correctamente al digest nuevo
+publicado hacía 1 hora.
+
+Causa raíz: el `docker pull ...:latest` no actualizó realmente la imagen
+local. El daemon mantuvo el manifest cacheado de `:latest` y el
+`compose up --force-recreate` recreó los contenedores con la imagen vieja.
+El job no falló porque el pull retornó exit 0 (pull "exitoso" sin descarga).
+La fix manual fue: `docker logout ghcr.io && docker pull ...:<sha_largo>`,
+retageo a `:latest` y `compose up --force-recreate`.
+
+### Decisión
+Eliminar `:latest` del path crítico del deploy. Cambios:
+
+1. **`docker-compose.yml`**: los tres servicios (`web`, `scheduler`, `worker`)
+   pasan a usar:
+   ```yaml
+   image: ghcr.io/johnydeev/ia-drive-doc-processor:${IMAGE_TAG:-latest}
+   ```
+   El default sigue siendo `:latest` para que `docker compose up` manual
+   ad-hoc no se rompa.
+
+2. **`.github/workflows/ci.yml`** (job `deploy`, step `Build and restart`):
+   - Setear `IMAGE_TAG: ${{ github.sha }}` en el `env:` del step.
+   - `docker pull ghcr.io/...:${{ github.sha }}` en vez de `:latest`.
+     Si la imagen del SHA no existe en GHCR (build fallido silencioso,
+     push denegado, etc.), el pull falla con error explícito → el job
+     aborta → no se queda corriendo la imagen vieja.
+   - `docker tag ...:${{ github.sha }} ...:latest` después del pull para
+     mantener el alias local actualizado (preserva el flujo manual).
+   - `compose run --rm web npx prisma migrate deploy` y
+     `compose up -d --force-recreate` heredan `IMAGE_TAG` del step y
+     usan la imagen pineada.
+
+Beneficio adicional: el rollback manual ante un deploy malo queda trivial.
+Hay que reapuntar `IMAGE_TAG` al SHA de la última versión buena y correr
+`compose up`. No depende de moverse contra un tag mutable.
+
+### Alternativas descartadas
+- **Solo validar el digest después del pull y abortar si no cambió.**
+  Funciona pero es frágil: requiere parsing y comparación de strings, y no
+  soluciona el problema de que `:latest` siga siendo un tag mutable. Pinear
+  por SHA elimina la categoría entera de problemas.
+- **`docker pull --platform` o variantes de force-pull.** No existe un flag
+  de `docker pull` que ignore el manifest cacheado. La única forma robusta
+  es cambiar el tag.
+- **Usar digest inmutable (`@sha256:...`) en lugar del SHA del commit.**
+  Es la opción más estricta pero requiere capturar el digest del push en
+  el build job y pasarlo al deploy. Más complejo sin un beneficio práctico
+  significativo sobre pinear por SHA del commit (que ya es inmutable porque
+  cada commit produce su propio tag).
+- **Rollback automático ante deploy fallido.** Fuera de alcance — la
+  detección ya existe vía el step "Wait for healthy"; un rollback
+  automático merece su propia decisión.
+
+### Impacto
+- Archivos modificados:
+  - `docker-compose.yml` — los tres servicios usan `${IMAGE_TAG:-latest}`.
+  - `.github/workflows/ci.yml` — job `deploy` pin por SHA + retageo local.
+- Sin cambios de schema, sin migración.
+- Próximo push a master ejercita el nuevo flujo. Si el `docker pull
+  :<sha>` falla, el deploy aborta antes de tocar contenedores en
+  producción.
+
+---
+
 ## 2026-05-18 — Claude (Anthropic) como tercer proveedor de IA en la cadena de extracción
 
 ### Problema

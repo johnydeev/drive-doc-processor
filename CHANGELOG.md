@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+- CI/CD: el job `deploy` ahora pinea la imagen de Docker por `${{ github.sha }}`
+  en vez de pullear `:latest`. `docker-compose.yml` lee el tag via
+  `${IMAGE_TAG:-latest}`. Esto evita que un manifest local cacheado de `:latest`
+  deje al host corriendo una imagen vieja después de un pull silenciosamente
+  exitoso pero sin actualizar (caso que ocurrió el 18/05/2026 con el commit
+  d33ff62). El step también retagea localmente a `:latest` después del pull
+  para preservar el flujo de `docker compose up` manual sin la env var.
+
 ### Added
 - Feature: soporte para Claude (Anthropic) como tercer proveedor de IA en la
   cadena de extracción. La cascada queda **Gemini → OpenAI → Claude** antes

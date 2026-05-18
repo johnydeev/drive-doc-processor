@@ -14,6 +14,22 @@ La cadena de extracción IA ahora soporta tres proveedores: **Gemini → OpenAI 
 
 ## Completado ✅
 
+- **Deploy pineado por SHA en CI** (18/05/2026)
+  - `docker-compose.yml`: los servicios `web`/`scheduler`/`worker` ahora
+    usan `image: ghcr.io/johnydeev/ia-drive-doc-processor:${IMAGE_TAG:-latest}`.
+    Default sigue siendo `:latest` para uso manual.
+  - `.github/workflows/ci.yml` (job `deploy`, step `Build and restart`):
+    - `env: IMAGE_TAG: ${{ github.sha }}` para el step entero.
+    - `docker pull ...:${{ github.sha }}` en vez de `:latest` (falla rápido
+      si la imagen del SHA no existe).
+    - `docker tag ...:${{ github.sha }} ...:latest` después del pull para
+      mantener el alias local actualizado para `compose up` manual.
+    - `compose run` (migrate) y `compose up` heredan `IMAGE_TAG` del step.
+  - Contexto: el 18/05/2026 el host quedó corriendo la imagen de mayo 7
+    porque `docker pull :latest` del job Deploy resolvió el manifest
+    cacheado sin actualizar al digest nuevo. Pinear por SHA elimina ese
+    modo de falla.
+
 - **Claude (Anthropic) como tercer proveedor de IA** (18/05/2026)
   - Dependencia: `@anthropic-ai/sdk` instalada.
   - Nuevo servicio `ClaudeExtractorService` en `src/services/claudeExtractor.service.ts`
