@@ -4,6 +4,59 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-17 — Tag de imagen Docker con SHA del commit para rollbacks
+
+### Problema
+El step "Build and push image" en `.github/workflows/ci.yml` publicaba la imagen
+únicamente como `ghcr.io/johnydeev/ia-drive-doc-processor:latest`. Cada push a
+master sobreescribía el tag `:latest` en GHCR y se perdía la referencia
+direccionable a la versión anterior. Si una release rompía algo en producción,
+no había forma trivial de hacer rollback: no existía un tag estable apuntando al
+build previo, y reproducirlo localmente no es práctico (depende del estado del
+caché de Buildx, secretos y entorno del runner).
+
+### Decisión
+Pasar de un tag único a una lista YAML con dos tags por build:
+
+```yaml
+tags: |
+  ghcr.io/johnydeev/ia-drive-doc-processor:latest
+  ghcr.io/johnydeev/ia-drive-doc-processor:${{ github.sha }}
+```
+
+`docker/build-push-action@v6` empuja ambos tags en un único push (capas
+compartidas, sin overhead de almacenamiento ni de tiempo). `:latest` sigue
+siendo el tag mutable que consume el job `deploy`; el SHA es un tag inmutable
+que queda para siempre asociado a ese commit específico.
+
+Rollback manual ante un deploy malo:
+```
+docker pull ghcr.io/johnydeev/ia-drive-doc-processor:<sha_estable>
+docker tag  ghcr.io/johnydeev/ia-drive-doc-processor:<sha_estable> \
+            ghcr.io/johnydeev/ia-drive-doc-processor:latest
+docker compose -p ia-drive-doc-processor up -d --force-recreate
+```
+
+### Alternativas descartadas
+- **Tag por timestamp** (`:20260517-1830`): legible pero no trazable al commit;
+  hay que cruzar con `git log` para saber qué cambió. El SHA es la única
+  referencia que ya es canónica en GitHub.
+- **Tag por número de run** (`${{ github.run_number }}`): se resetea si se
+  recrea el workflow o se mueve a otro repo, y no tiene vínculo con el árbol
+  de git.
+- **Tag por versión semántica desde `package.json`**: requeriría disciplina de
+  bump manual o release-please; hoy no hay versionado semántico en el repo.
+- **Modificar el job `deploy` para usar SHA en vez de `:latest`**: el owner
+  quiere mantener el deploy automático apuntando a `:latest`. El SHA queda
+  disponible solo para rollback intencional.
+
+### Impacto
+- `.github/workflows/ci.yml`: único cambio (step "Build and push image" del job `build`).
+- No afecta `deploy`, ni `docker-compose.yml`, ni los servicios `web/scheduler/worker`.
+- A partir del próximo push a master habrá tags `:${{ sha }}` disponibles en GHCR.
+
+---
+
 ## 2026-05-11 — Resumen agregado en el worker al vaciarse la cola
 
 ### Problema

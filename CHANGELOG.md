@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- CI: la imagen de Docker en `ghcr.io/johnydeev/ia-drive-doc-processor` ahora
+  se tagea con `:latest` y con `${{ github.sha }}` en cada push a master,
+  habilitando rollbacks a versiones anteriores por SHA.
 - Feature: reporte de resumen al final de cada ciclo automático del
   scheduler, solo cuando se encontró al menos 1 archivo.
   Muestra encontrados, encolados y ya en cola.

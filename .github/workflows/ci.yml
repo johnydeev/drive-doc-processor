@@ -59,7 +59,9 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
-          tags: ghcr.io/johnydeev/ia-drive-doc-processor:latest
+          tags: |
+            ghcr.io/johnydeev/ia-drive-doc-processor:latest
+            ghcr.io/johnydeev/ia-drive-doc-processor:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

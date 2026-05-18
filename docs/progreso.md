@@ -12,6 +12,13 @@ El sistema core está funcionando en producción. Pipeline de PDFs, extracción 
 
 ## Completado ✅
 
+- **CI: tag de imagen Docker con SHA del commit** (17/05/2026)
+  - `.github/workflows/ci.yml` (step "Build and push image") ahora produce dos
+    tags simultáneos: `:latest` y `:${{ github.sha }}`
+  - Permite rollbacks puntuales en el deploy haciendo `docker pull` del SHA
+    correspondiente a una versión estable anterior
+  - Sin cambios en el resto del pipeline (deploy sigue usando `:latest`)
+
 - **Resumen del ciclo automático del scheduler** (11/05/2026)
   - `schedulerLog.cycleSummary()` nuevo en `src/lib/logger.ts` con Encontrados / Encolados / Ya en cola
   - `src/jobs/scheduler.ts::runOnce()` acumula `totalFound`, `totalQueued` y `totalSkipped`
