@@ -4,6 +4,106 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-21 — Fix: docker login con action oficial (CRLF de PowerShell rompe --password-stdin)
+
+### Problema
+
+Después de migrar los scripts a PowerShell (entrada abajo), el CI run #53
+falló en el step "Build and restart" con:
+
+```
+==> docker login
+Error response from daemon: Get "https://ghcr.io/v2/": denied: denied
+docker login failed with exit code 1
+```
+
+Lo confuso era que el mismo `GITHUB_TOKEN` funcionaba en el job `build`
+(que pushea imágenes a GHCR vía `docker/login-action@v3`) y antes con
+bash `-p $TOKEN` también funcionaba. Solo fallaba con
+`$env:GHCR_TOKEN | docker login --password-stdin` en PowerShell.
+
+### Causa raíz
+
+PowerShell 5.1 (Windows PowerShell) tiene un comportamiento por defecto
+del pipeline donde **siempre agrega CRLF al final** del string pipeado a
+un native command. `Write-Output` (y por extensión `$x | cmd`) termina
+con line ending del sistema.
+
+`docker login --password-stdin` lee stdin hasta EOF, sin interpretar
+newlines. Entonces:
+
+- Pipe esperado: `<token>` (40 chars del GITHUB_TOKEN)
+- Pipe real recibido por Docker: `<token>\r\n` (42 chars)
+
+Docker manda esos 42 bytes como password al endpoint de GHCR. GHCR
+compara contra el token real (40 chars) y rechaza con `denied: denied`.
+
+`denied: denied` (en vez de `unauthorized`) es la respuesta de GHCR
+cuando recibe credenciales con formato válido pero que no matchean a
+ningún token activo — exactamente el caso de un token con bytes extra.
+
+### Decisión
+
+Reemplazar el `docker login` manual por la action oficial
+`docker/login-action@v3` (misma que ya usaba el job `build`):
+
+```yaml
+- name: Login to GHCR
+  uses: docker/login-action@v3
+  with:
+    registry: ghcr.io
+    username: johnydeev
+    password: ${{ secrets.GITHUB_TOKEN }}
+```
+
+La action está implementada en TypeScript (no shell) y llama directamente
+a la CLI de Docker con un buffer binario controlado, evitando el
+problema de CRLF por completo. Funciona uniforme en Linux, macOS y
+Windows (cmd, PowerShell 5.1, PowerShell Core 7).
+
+Como efecto adicional, la action también es la solución oficial al
+problema más general: cada shell tiene quirks distintos con stdin
+(bash agrega newline si usás `echo`, pero no con `printf '%s'`; cmd
+tiene `echo|set /p=` para no agregar; PowerShell 5.1 siempre agrega
+CRLF; etc.). Delegar a una action mantiene el código portable y libre
+de estos detalles.
+
+### Beneficio mantenido de Crítica #2
+
+El propósito original de Crítica #2 era que el token **no apareciera
+como argumento de proceso visible** (`ps aux`, `/proc/<pid>/cmdline`,
+warnings de Docker). La action oficial cumple eso — internamente usa
+`--password-stdin` con un Buffer Node.js sin shell intermedio. El token
+viaja por stdin del proceso `docker`, no por argumentos.
+
+### Alternativas descartadas
+
+- **`cmd /c "echo|set /p=$env:GHCR_TOKEN | docker login --password-stdin"`**
+  Mezcla cmd dentro de PowerShell con escaping anidado. Frágil y
+  difícil de debuggear si algo cambia.
+- **Escribir el token a un archivo temporal y `Get-Content -Raw`.**
+  Funciona pero crea archivo en disco con secret (aunque temporal),
+  riesgo si crashea el script antes del `Remove-Item`.
+- **Volver a `-p $TOKEN`** sacrificando Crítica #2. Funciona pero
+  pierde el hardening de seguridad sin razón técnica.
+- **PowerShell Core 7 (`pwsh`)** que maneja mejor los pipes con
+  `$PSNativeCommandArgumentPassing = 'Standard'`. Requiere asumir PS7
+  instalado en el runner; PS 5.1 viene built-in.
+
+### Impacto
+
+- `.github/workflows/ci.yml`, job `deploy`:
+  - Nuevo step "Login to GHCR" usando `docker/login-action@v3` antes de
+    "Build and restart".
+  - "Build and restart" pierde el `Invoke-Step "docker login"` y la env
+    var `GHCR_TOKEN`.
+- **Lección operativa:** para autenticación contra registries en CI,
+  preferir actions oficiales (`docker/login-action`, `aws-actions/configure-aws-credentials`, etc.) en vez de scripts shell que dependen del
+  comportamiento exacto del intérprete. El esfuerzo de mantener cross-shell
+  es alto y los bugs son sutiles.
+
+---
+
 ## 2026-05-21 — Fix: scripts del deploy reescritos en PowerShell
 
 ### Problema

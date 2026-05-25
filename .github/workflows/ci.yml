@@ -93,18 +93,25 @@ jobs:
           $lines = (Get-Content .env | Measure-Object -Line).Lines
           Write-Host "::notice::.env escrito desde secret ($lines lineas)"
 
+      # Crítica #2: docker login via action oficial (maneja --password-stdin
+      # cross-platform sin el problema del CRLF del pipe de PowerShell 5.1).
+      # El token no aparece como argumento de comando visible.
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: johnydeev
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       # Crítica #1: aborta el script si cualquier comando falla. PowerShell con
       # $ErrorActionPreference='Stop' solo cubre cmdlets — los exit codes de
       # native commands (docker, npx) hay que chequearlos manualmente con
       # $LASTEXITCODE. Sin esto, un migrate deploy fallido no impedia que se
       # levantaran containers con codigo nuevo contra DB vieja (silent failure).
-      # Crítica #2: docker login con --password-stdin para no exponer el token
-      # como argumento de comando (ps, /proc, warnings de docker).
       - name: Build and restart
         shell: powershell
         env:
           IMAGE_TAG: ${{ github.sha }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
           function Invoke-Step {
@@ -114,9 +121,6 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE" }
           }
 
-          Invoke-Step "docker login" {
-            $env:GHCR_TOKEN | docker login ghcr.io -u johnydeev --password-stdin
-          }
           Invoke-Step "docker pull" {
             docker pull "ghcr.io/johnydeev/ia-drive-doc-processor:${env:IMAGE_TAG}"
           }

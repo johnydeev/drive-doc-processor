@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Security / CI
+- **Fix: `docker login` con action oficial (2026-05-21)**. El intento
+  anterior usaba `$env:GHCR_TOKEN | docker login --password-stdin` en
+  PowerShell. Falló en CI run #53 con `denied: denied`. Causa: PowerShell
+  5.1 con `Write-Output`/`|` agrega CRLF al final del string pipeado;
+  `docker login --password-stdin` lee hasta EOF e interpreta el token
+  como `<token>\r\n`, que GHCR rechaza. Reemplazado por la action oficial
+  `docker/login-action@v3` (misma que ya usa el job `build`) que
+  internamente maneja el password-stdin correctamente en
+  Linux/macOS/Windows. Mantiene el beneficio de Crítica #2 (token nunca
+  como argumento visible).
 - **Fix: scripts del job `deploy` reescritos en PowerShell (2026-05-21)**.
   El primer intento de los 3 fixes críticos (commit anterior) usaba
   `shell: bash`, pero el runner self-hosted Windows no tiene

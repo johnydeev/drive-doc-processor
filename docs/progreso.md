@@ -14,6 +14,18 @@ La cadena de extracción IA ahora soporta tres proveedores: **Gemini → OpenAI 
 
 ## Completado ✅
 
+- **Fix: docker login con action oficial (CRLF en PowerShell)** (21/05/2026)
+  - El intento anterior con `$env:GHCR_TOKEN | docker login --password-stdin`
+    falló en CI #53 con `denied: denied`. Causa: PowerShell 5.1 agrega CRLF
+    al final del string pipeado, lo cual hace que Docker envíe `<token>\r\n`
+    como password — GHCR lo rechaza.
+  - Reemplazado por la action oficial `docker/login-action@v3` (misma que
+    usa el job `build`), que maneja `--password-stdin` cross-platform en
+    código TypeScript sin pasar por shell.
+  - Mantiene el beneficio de Crítica #2 (token nunca como argumento visible).
+  - **Lección:** para auth contra registries en CI usar actions oficiales,
+    no scripts shell que dependen del comportamiento del intérprete.
+
 - **Fix: scripts del deploy reescritos en PowerShell** (21/05/2026)
   - Primer intento del hardening usaba `shell: bash` y falló en CI run #52
     porque el runner self-hosted Windows no tiene `/bin/bash`. Reescritos
