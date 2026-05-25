@@ -31,6 +31,7 @@ export interface SchedulerRuntimeState {
   lastError: string | null;
   lastSummary: ProcessJobSummary | null;
   lastDirectorySyncAt: string | null;
+  lastPaymentsSyncAt: string | null;
   totals: SchedulerTotals;
   quota: {
     openai: ProviderQuotaState;

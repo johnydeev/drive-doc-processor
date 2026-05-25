@@ -4,6 +4,206 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-21 — Sistema de pagos: modal UI + sincronización Sheets→DB sobre la misma fila
+
+### Problema
+
+Necesitábamos un flujo para registrar pagos de boletas que cumpliera tres
+condiciones simultáneas:
+
+1. **Pago visible y editable en Sheets** — el cliente trabaja en Sheets
+   habitualmente y quería ver el estado de pago en la misma fila de la
+   boleta (no en una hoja separada ni en una UI aparte).
+2. **Comprobante PDF adjunto** — al pagar, el cliente sube el PDF del
+   recibo a Drive y queda linkeado desde la fila.
+3. **Soporte para cuotas y pagos parciales** — boletas grandes se pagan
+   en varias cuotas; los saldos residuales deben quedar visibles en el
+   período siguiente (mes+1) sin perder trazabilidad.
+
+Internamente, esto implicaba dos decisiones de diseño:
+
+- **Camino de entrada**: ¿el cliente carga el pago desde Sheets o desde
+  un modal en la UI? Sheets es cómodo en bulk pero no permite subir el PDF
+  desde la misma celda. La UI es más completa pero el cliente prefiere
+  Sheets para revisiones rápidas.
+- **Idempotencia**: si el cliente edita una fila y vuelve a sincronizar,
+  no podemos crear `Payment` duplicados en DB.
+
+### Decisión
+
+**1. Doble camino sobre la misma fuente de verdad (columnas Q/R/S/T/U).**
+Las columnas P=SALDO PENDIENTE, Q=MONTO PAGADO, R=CANT CUOTAS, S=FECHA
+PAGO, T=URL COMPROBANTE en la hoja de boletas son la representación
+canónica del pago. Los dos caminos escriben sobre ellas:
+
+- **Camino A — Modal en UI:** botón "Pagar" en cada fila → modal con
+  inputs + upload PDF → `POST /api/client/invoices/[id]/payments` con
+  `multipart/form-data` → sube PDF a Drive + crea Payment en DB +
+  actualiza Q/R/S/T + recalcula P/N + mueve M si hay saldo.
+- **Camino B — Sincronización Sheets→DB:** cliente edita Q/R/S/T en
+  Sheets manualmente → botón "Sincronizar pagos" en sidebar →
+  `POST /api/client/sync-payments` lee esas columnas, hace upsert
+  idempotente en `Payment`, recalcula P/N y mueve M.
+
+Decartamos una hoja PAGOS separada (estuvo en la primera iteración del
+diseño): generaba ambigüedad sobre la fuente de verdad y obligaba al
+cliente a saltar entre hojas para entender el estado de una boleta.
+
+**2. Clave natural de idempotencia para `Payment`.** Identificamos cada
+pago por la combinación `invoiceId + isoDayKey(paymentDate) +
+amount.toFixed(2)`. Si esa clave ya existe en `Payment` para la invoice,
+el sync actualiza campos secundarios (driveFileUrl); si no, crea. El
+cliente puede editar/duplicar/borrar filas sin generar basura. Sin
+columnas extra en la hoja.
+
+**3. Reasignación de `periodId` al mes siguiente para pagos parciales.**
+Tras recalcular saldos, si `remainingBalance > 0` y la invoice tiene
+período asignado, se busca (o crea ACTIVE) el período del mes siguiente
+del mismo consorcio y se reasigna `Invoice.periodId`. La fila en Sheets
+refleja el cambio actualizando M (PERIODO) en el mismo batch que N/P/Q/R/S/T/U.
+Guardas: si la boleta ya está en el mes destino, no se mueve de nuevo
+(evita saltos repetidos en re-syncs).
+
+**4. Multipart con archivo opcional en el endpoint de pagos.** El endpoint
+`POST /api/client/invoices/[id]/payments` detecta el content-type:
+`application/json` mantiene el contrato legacy (la PagosView inline existente
+sigue funcionando); `multipart/form-data` activa el nuevo flujo con PDF.
+Reusa el `PaymentRepository` para la lógica de cuotas/saldo y delega la
+subida a Drive al `GoogleDriveService` (carpeta `receipts/consorcio/período`,
+mismo patrón que el endpoint legacy `/receipt`).
+
+**5. Protección de columnas A:U con `addProtectedRange` (toggleable).**
+Endpoints:
+
+- `POST /api/client/setup-sheet-protection`: aplica protección. La service
+  account queda como único editor (`editors.users = [clientEmail]`),
+  `warningOnly: false`. Idempotente — limpia rangos previos con descripción
+  `dpp:invoices-lock`. **Antes de proteger ejecuta el auto-sync** (ver punto 7).
+- `DELETE /api/client/setup-sheet-protection`: quita los rangos
+  `dpp:invoices-lock` para permitir ediciones manuales en casos puntuales.
+  Solo rol CLIENT — el cliente es dueño de su propia hoja.
+
+Decidimos que sea **toggle manual** (en vez de timer con auto-relock) por
+simpleza: el cliente desbloquea, edita en Sheets, vuelve a la app y aprieta
+"Proteger hoja". La UI muestra una confirmación al desbloquear recordando
+que hay que re-bloquear cuando se termine. Trade-off aceptado: si el
+cliente se olvida, la hoja queda desprotegida hasta que vuelva a apretar
+"Proteger hoja". No agregamos cron/timer porque incrementa complejidad
+operativa sin ganancia clara (las ediciones puntuales son raras).
+
+**7. Auto-sync al re-proteger.** Cuando el cliente aprieta "Proteger hoja",
+el endpoint POST ejecuta `syncInvoicePaymentsFromSheets(clientId)` antes
+del `addProtectedRange`. Esto vuelca a la DB cualquier edición manual de las
+columnas Q/R/S/T/U mientras la hoja estaba desbloqueada. Si el sync falla,
+**NO** se aplica la protección — devuelve error con detalle para que el
+cliente pueda corregir y reintentar. Beneficio: el cliente no tiene que
+acordarse de apretar "Sincronizar pagos" después de editar; un solo click
+("Proteger hoja") hace ambas cosas.
+
+Para evitar duplicar código, la lógica del sync se extrajo a
+`src/lib/syncInvoicePayments.ts::syncInvoicePaymentsFromSheets`. Tanto
+`/sync-payments` (botón "Sincronizar pagos") como `/setup-sheet-protection`
+(POST, antes de proteger) la invocan.
+
+**6. `updateInvoicePaymentInfo` con campos opcionales.** El método recibe
+`values: { paymentStatus?, remainingBalance?, period?, paidAmount?,
+installmentsCount?, paymentDate?, receiptUrl? }` y arma un `batchUpdate`
+solo con los rangos presentes. Permite que cada endpoint controle qué
+columnas tocar (ej: el sync no escribe Q/R/S/T porque ya están bien — solo
+recalcula derivados).
+
+### Alternativas descartadas
+
+- **Hoja PAGOS separada** (primer diseño). Generaba doble fuente de verdad
+  y rompía la unicidad visual "una boleta = una fila". Rechazada.
+- **Columna PAYMENT_ID auto-generada en la hoja para idempotencia.** Más
+  explícita pero invade el formato visible. Rechazada por fricción.
+- **Borrar y recrear todos los Payment del cliente en cada sync.** Pierde
+  `createdAt` histórico, dificulta auditoría, rompe FKs futuras.
+- **Crear un Invoice nuevo por el saldo restante.** Genera registros
+  fantasma sin PDF asociado, rompe la reconciliación 1:1 Invoice/PDF.
+- **Proteger solo las columnas A:O (sin P-T).** Las columnas nuevas las
+  escribe la app — si el cliente puede editarlas en Google, rompe la
+  reconciliación al siguiente sync.
+- **Persistir `Invoice.paidAmount` como columna en DB.** Es un derivado
+  trivial (`amount - remainingBalance`, o `SUM(payments.amount)`).
+  Persistirlo crea tercera fuente de verdad que puede desincronizarse.
+  Regla aplicada: no persistimos derivados salvo razón de performance
+  medida que lo justifique.
+
+### Impacto
+
+- **Schema**: `SchedulerState.lastPaymentsSyncAt DateTime?`. Migración
+  `20260521000100_add_payment_sync_fields`.
+- **GoogleSheetsService**: nuevos métodos `readInvoicePaymentRows`
+  (lectura para sync), `updateInvoicePaymentInfo` (escritura batch
+  opcional sobre N/P/M/Q/R/S/T), `protectInvoiceColumns`, `getSheetId`.
+- **Mapping** (`SheetsRowMapping`): 5 columnas nuevas — `paidAmount: "Q"`,
+  `installmentsCount: "R"`, `paymentDate: "S"`, `receiptUrl: "T"`,
+  `paidWith: "U"` con headers MONTO PAGADO, CANT CUOTAS, FECHA PAGO,
+  URL COMPROBANTE, MEDIO PAGO. Default actualizado en los 5 lugares
+  (`processPendingDocuments.job.ts`, `consortiums/[id]/invoices/route.ts`,
+  `invoices/[id]/payments/route.ts`, `setup-sheet-protection/route.ts`,
+  `sync-payments/route.ts`) y en `requiredKeys` de
+  `clientProcessingConfig.resolveMapping`. La key `paidWith` evita
+  colisionar con `Invoice.paymentMethod` (enum LSP extraído por la IA al
+  procesar la factura), que NO se escribe en Sheets.
+- **Endpoints nuevos**: `/api/client/sync-payments`,
+  `/api/client/setup-sheet-protection` (POST proteger + DELETE desproteger).
+- **Helper compartido**: `src/lib/syncInvoicePayments.ts` con
+  `syncInvoicePaymentsFromSheets(clientId)`. Reusado por `/sync-payments` y
+  por POST de `/setup-sheet-protection` (auto-sync antes de re-proteger).
+- **Endpoint modificado**: `/api/client/invoices/[id]/payments` ahora
+  acepta multipart con PDF opcional, reasigna periodId al mes+1, y
+  actualiza N/P/M/Q/R/S/T en Sheets.
+- **UI**: botón "Pagar" en cada fila de la tabla de Boletas + modal nuevo
+  con form + upload. Botones "Sincronizar pagos", "Proteger hoja" y
+  "Desproteger hoja" en el sidebar (solo CLIENT). El de desproteger pide
+  confirmación.
+
+### Modal de pago con detección automática de modo (8 — agregado en iteración)
+
+El `PaymentRepository.createPayment` ya soportaba desde antes dos modos
+(cuotas pactadas vs libre), pero el modal de UI inicial pedía siempre el
+monto editable y el campo de cuotas, sin reflejar el modo activo. Esto
+generaba dos confusiones:
+
+1. En modo cuotas, el usuario podía escribir un monto que el backend
+   silenciosamente reemplazaba por `amount/totalInstallments` (sorpresa).
+2. Al hacer el segundo pago de una boleta en cuotas, el modal volvía a
+   pedir `totalInstallments` cuando ya estaba fijado — el backend tiraba
+   error 409 pero recién al guardar.
+
+**Decisión:** el modal hace `GET /api/client/invoices/[id]/payments` al
+abrir y deriva el modo activo desde `payments[0].totalInstallments`:
+`null` → modo libre, no-null → modo cuotas. Render condicional según el
+estado:
+
+- **Primer pago** (sin payments previos): toggle "Pago libre / Cuotas".
+  En cuotas, input `totalInstallments` visible + monto autocalculado
+  readonly.
+- **Modo cuotas en curso**: banner azul con "Cuota N de M",
+  `totalInstallments` ya fijado por el repo, monto autocalculado readonly.
+  Cuando es la última cuota, mostramos un aviso explicando que absorbe el
+  redondeo (porque ahí el backend usa `currentRemaining` directo en vez de
+  `amount/totalInstallments`).
+- **Modo libre en curso**: banner naranja, input cuotas oculto (no se
+  puede agregar cuotas a una serie libre), monto editable con default =
+  `remainingBalance`.
+
+El backend sigue siendo la **única fuente de verdad** sobre el monto
+efectivo (en modo cuotas calcula `amount/totalInstallments` ignorando lo
+que mande el cliente). El modal solo replica ese cálculo localmente para
+mostrar la cifra correcta y evitar la sorpresa visual.
+
+**Botón "Ver pagos"** (cuando `inv.isPaid`): reemplaza el botón "Pagar"
+que ya no aplica. Abre un modal read-only con la tabla de pagos: tipo
+(Cuota N/M o Libre), fecha, monto, medio, link a comprobante PDF y
+observación. Útil para auditar boletas ya saldadas sin tener que ir a la
+DB ni a Sheets.
+
+---
+
 ## 2026-05-18 — Pin de imagen Docker por SHA en deploy (en vez de `:latest`)
 
 ### Problema

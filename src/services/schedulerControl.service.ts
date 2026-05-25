@@ -297,6 +297,7 @@ export class SchedulerControlService {
       lastError: latestError(states),
       lastSummary: aggregateLastSummary(states),
       lastDirectorySyncAt: maxDate(states.map((s) => s.lastDirectorySyncAt)),
+      lastPaymentsSyncAt: maxDate(states.map((s) => s.lastPaymentsSyncAt)),
       totals,
       quota: {
         openai: combineQuota(states, "quotaOpenAiStatus", "quotaOpenAiNote"),
@@ -382,6 +383,7 @@ function createDefaultState(intervalMinutes: number): SchedulerRuntimeState {
     lastError: null,
     lastSummary: null,
     lastDirectorySyncAt: null,
+    lastPaymentsSyncAt: null,
     totals: {
       runs: 0,
       totalFound: 0,

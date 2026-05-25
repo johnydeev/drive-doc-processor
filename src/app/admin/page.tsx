@@ -576,6 +576,7 @@ export default function AdminPage() {
               <li>Ultimo inicio: <strong>{formatDate(state?.lastRunStartedAt)}</strong></li>
               <li>Ultimo fin: <strong>{formatDate(state?.lastRunEndedAt)}</strong></li>
               <li>Ultima sync directorio: <strong>{formatDate(state?.lastDirectorySyncAt)}</strong></li>
+              <li>Ultima sync pagos: <strong>{formatDate(state?.lastPaymentsSyncAt)}</strong></li>
             </ul>
           </article>
           {!isAdmin && (

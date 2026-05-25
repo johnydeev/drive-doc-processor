@@ -249,6 +249,7 @@ model SchedulerState {
   quotaGeminiStatus    String    @default("unknown")
   quotaGeminiNote      String?
   lastDirectorySyncAt  DateTime?
+  lastPaymentsSyncAt   DateTime?
   createdAt            DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   client            Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)

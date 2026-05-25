@@ -87,6 +87,12 @@ const DEFAULT_MAPPING: SheetsRowMapping = {
   period: "M",
   paymentStatus: "N",
   bank: "O",
+  remainingBalance: "P",
+  paidAmount: "Q",
+  installmentsCount: "R",
+  paymentDate: "S",
+  receiptUrl: "T",
+  paidWith: "U",
 };
 
 function createBaseSummary(totalFound: number): ProcessJobSummary {

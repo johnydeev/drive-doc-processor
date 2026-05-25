@@ -16,4 +16,10 @@
   isDuplicate?: "YES" | "NO" | null;
   paymentStatus?: string | null;
   bank?: string | null;
+  remainingBalance?: number | string | null;
+  paidAmount?: number | string | null;
+  installmentsCount?: string | null;
+  paymentDate?: string | null;
+  receiptUrl?: string | null;
+  paidWith?: string | null;
 }

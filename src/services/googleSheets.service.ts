@@ -20,6 +20,12 @@ export interface SheetsRowMapping {
   period: string;
   paymentStatus: string;
   bank: string;
+  remainingBalance: string;
+  paidAmount: string;
+  installmentsCount: string;
+  paymentDate: string;
+  receiptUrl: string;
+  paidWith: string;
 }
 
 export interface InsertRowResult {
@@ -43,6 +49,12 @@ const HEADER_BY_FIELD: Record<keyof SheetsRowMapping, string> = {
   period: "PERIODO",
   paymentStatus: "ESTADO PAGO",
   bank: "BANCO",
+  remainingBalance: "SALDO PENDIENTE",
+  paidAmount: "MONTO PAGADO",
+  installmentsCount: "CANT CUOTAS",
+  paymentDate: "FECHA PAGO",
+  receiptUrl: "URL COMPROBANTE",
+  paidWith: "MEDIO PAGO",
 };
 
 /**
@@ -111,7 +123,7 @@ export class GoogleSheetsService {
       const index = this.columnToIndex(column);
       const value = data[key];
 
-      if (key === "amount") {
+      if (key === "amount" || key === "remainingBalance" || key === "paidAmount") {
         row[index] = formatAmountARS(value as number | string | null | undefined);
       } else {
         row[index] = value === undefined || value === null ? "" : String(value);
@@ -491,5 +503,312 @@ export class GoogleSheetsService {
     );
 
     return true;
+  }
+
+  /**
+   * Actualiza ESTADO PAGO (N), SALDO PENDIENTE (P), PERIODO (M), MONTO PAGADO (Q),
+   * CANT CUOTAS (R), FECHA PAGO (S) y URL COMPROBANTE (T) en la fila de la hoja de
+   * boletas correspondiente a una invoice. Cada campo es opcional — solo se actualizan
+   * los presentes en `values`. Búsqueda análoga a updatePaymentStatus.
+   */
+  async updateInvoicePaymentInfo(
+    sheetName: string,
+    mapping: SheetsRowMapping,
+    keys: { boletaNumber?: string | null; sourceFileUrl?: string | null; providerTaxId?: string | null },
+    values: {
+      paymentStatus?: string;
+      remainingBalance?: number | null;
+      period?: string;
+      paidAmount?: number | null;
+      installmentsCount?: string | null;
+      paymentDate?: string | null;
+      receiptUrl?: string | null;
+      paidWith?: string | null;
+    }
+  ): Promise<boolean> {
+    const range = this.getRangeFromMapping(sheetName, mapping);
+    const response = await this.withRetry(() =>
+      this.sheets.spreadsheets.values.get({
+        spreadsheetId: this.spreadsheetId,
+        range,
+      })
+    );
+    const rows = response.data.values ?? [];
+    if (rows.length < 2) return false;
+
+    const columnOffsets = Object.values(mapping).map((c) => this.columnToIndex(c));
+    const minIndex = Math.min(...columnOffsets);
+    const idx = (col: string) => this.columnToIndex(col) - minIndex;
+
+    const boletaIdx = idx(mapping.boletaNumber);
+    const sourceIdx = idx(mapping.sourceFileUrl);
+    const taxIdx = idx(mapping.providerTaxId);
+
+    const targetSource = (keys.sourceFileUrl ?? "").trim();
+    const targetBoleta = (keys.boletaNumber ?? "").trim();
+    const targetTax = (keys.providerTaxId ?? "").replace(/\D/g, "");
+
+    let matchedRow = -1;
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i];
+      const sourceCell = (row[sourceIdx] ?? "").toString().trim();
+      const boletaCell = (row[boletaIdx] ?? "").toString().trim();
+      const taxCell = (row[taxIdx] ?? "").toString().replace(/\D/g, "");
+
+      if (targetSource && sourceCell && sourceCell === targetSource) {
+        matchedRow = i + 1;
+        break;
+      }
+      if (
+        targetBoleta &&
+        boletaCell &&
+        boletaCell === targetBoleta &&
+        (!targetTax || !taxCell || taxCell === targetTax)
+      ) {
+        matchedRow = i + 1;
+        break;
+      }
+    }
+
+    if (matchedRow < 2) return false;
+
+    const updates: Array<{ range: string; values: string[][] }> = [];
+
+    if (values.paymentStatus !== undefined) {
+      updates.push({
+        range: `${sheetName}!${mapping.paymentStatus}${matchedRow}:${mapping.paymentStatus}${matchedRow}`,
+        values: [[values.paymentStatus]],
+      });
+    }
+    if (values.remainingBalance !== undefined) {
+      updates.push({
+        range: `${sheetName}!${mapping.remainingBalance}${matchedRow}:${mapping.remainingBalance}${matchedRow}`,
+        values: [[formatAmountARS(values.remainingBalance)]],
+      });
+    }
+    if (values.period !== undefined) {
+      updates.push({
+        range: `${sheetName}!${mapping.period}${matchedRow}:${mapping.period}${matchedRow}`,
+        values: [[values.period]],
+      });
+    }
+    if (values.paidAmount !== undefined) {
+      updates.push({
+        range: `${sheetName}!${mapping.paidAmount}${matchedRow}:${mapping.paidAmount}${matchedRow}`,
+        values: [[formatAmountARS(values.paidAmount)]],
+      });
+    }
+    if (values.installmentsCount !== undefined) {
+      updates.push({
+        range: `${sheetName}!${mapping.installmentsCount}${matchedRow}:${mapping.installmentsCount}${matchedRow}`,
+        values: [[values.installmentsCount ?? ""]],
+      });
+    }
+    if (values.paymentDate !== undefined) {
+      updates.push({
+        range: `${sheetName}!${mapping.paymentDate}${matchedRow}:${mapping.paymentDate}${matchedRow}`,
+        values: [[values.paymentDate ?? ""]],
+      });
+    }
+    if (values.receiptUrl !== undefined) {
+      updates.push({
+        range: `${sheetName}!${mapping.receiptUrl}${matchedRow}:${mapping.receiptUrl}${matchedRow}`,
+        values: [[values.receiptUrl ?? ""]],
+      });
+    }
+    if (values.paidWith !== undefined) {
+      updates.push({
+        range: `${sheetName}!${mapping.paidWith}${matchedRow}:${mapping.paidWith}${matchedRow}`,
+        values: [[values.paidWith ?? ""]],
+      });
+    }
+
+    if (updates.length === 0) return true;
+
+    await this.withRetry(() =>
+      this.sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: updates,
+        },
+      })
+    );
+
+    return true;
+  }
+
+  /**
+   * Lee las filas de la hoja de boletas y devuelve los datos de pago de cada fila
+   * (columnas Q/R/S/T + identificadores). Útil para sync Sheets → DB.
+   */
+  async readInvoicePaymentRows(
+    sheetName: string,
+    mapping: SheetsRowMapping
+  ): Promise<Array<{
+    rowNumber: number;
+    boletaNumber: string | null;
+    sourceFileUrl: string | null;
+    providerTaxId: string | null;
+    paidAmount: string | null;
+    installmentsCount: string | null;
+    paymentDate: string | null;
+    receiptUrl: string | null;
+    paidWith: string | null;
+  }>> {
+    const range = this.getRangeFromMapping(sheetName, mapping);
+    const response = await this.withRetry(() =>
+      this.sheets.spreadsheets.values.get({
+        spreadsheetId: this.spreadsheetId,
+        range,
+      })
+    );
+    const rows = response.data.values ?? [];
+    if (rows.length < 2) return [];
+
+    const columnOffsets = Object.values(mapping).map((c) => this.columnToIndex(c));
+    const minIndex = Math.min(...columnOffsets);
+    const idx = (col: string) => this.columnToIndex(col) - minIndex;
+
+    const result = [];
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i] ?? [];
+      const getCell = (col: string): string | null => {
+        const v = (row[idx(col)] ?? "").toString().trim();
+        return v ? v : null;
+      };
+
+      const paidAmount = getCell(mapping.paidAmount);
+      const paymentDate = getCell(mapping.paymentDate);
+
+      // Solo retornamos filas con pago efectivamente cargado (monto + fecha)
+      if (!paidAmount || !paymentDate) continue;
+
+      result.push({
+        rowNumber: i + 1,
+        boletaNumber: getCell(mapping.boletaNumber),
+        sourceFileUrl: getCell(mapping.sourceFileUrl),
+        providerTaxId: getCell(mapping.providerTaxId),
+        paidAmount,
+        installmentsCount: getCell(mapping.installmentsCount),
+        paymentDate,
+        receiptUrl: getCell(mapping.receiptUrl),
+        paidWith: getCell(mapping.paidWith),
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Devuelve el sheetId numérico de una hoja por nombre (necesario para protectedRanges).
+   */
+  async getSheetId(sheetName: string): Promise<number | null> {
+    const spreadsheet = await this.withRetry(() =>
+      this.sheets.spreadsheets.get({ spreadsheetId: this.spreadsheetId })
+    );
+    const found = spreadsheet.data.sheets?.find((s) => s.properties?.title === sheetName);
+    return found?.properties?.sheetId ?? null;
+  }
+
+  /**
+   * Elimina todos los protectedRange de la hoja indicada marcados con la descripción
+   * `dpp:invoices-lock`. Retorna la cantidad de rangos eliminados. Idempotente
+   * (devuelve 0 si no había ninguno).
+   */
+  async unprotectInvoiceColumns(sheetName: string): Promise<number> {
+    const spreadsheet = await this.withRetry(() =>
+      this.sheets.spreadsheets.get({
+        spreadsheetId: this.spreadsheetId,
+        fields: "sheets(properties(sheetId,title),protectedRanges(protectedRangeId,description))",
+      })
+    );
+    const sheet = spreadsheet.data.sheets?.find((s) => s.properties?.title === sheetName);
+    if (!sheet) {
+      throw new Error(`Sheet "${sheetName}" no encontrada en el archivo`);
+    }
+
+    const ids = (sheet.protectedRanges ?? [])
+      .filter((r) => r.description === "dpp:invoices-lock")
+      .map((r) => r.protectedRangeId)
+      .filter((id): id is number => typeof id === "number");
+
+    if (ids.length === 0) return 0;
+
+    await this.withRetry(() =>
+      this.sheets.spreadsheets.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: {
+          requests: ids.map((id) => ({
+            deleteProtectedRange: { protectedRangeId: id },
+          })),
+        },
+      })
+    );
+
+    return ids.length;
+  }
+
+  /**
+   * Protege las columnas A:endColumn de la hoja indicada de modo que solo la service
+   * account pueda editarlas. Limpia protecciones previas marcadas con la descripción
+   * `dpp:invoices-lock` antes de crear una nueva (idempotente).
+   *
+   * endColumnIndex es 0-based exclusive (P = 16).
+   * serviceAccountEmail se agrega como editor explícito para poder seguir actualizando vía API.
+   */
+  async protectInvoiceColumns(
+    sheetName: string,
+    endColumnIndex: number,
+    serviceAccountEmail: string
+  ): Promise<number> {
+    const spreadsheet = await this.withRetry(() =>
+      this.sheets.spreadsheets.get({
+        spreadsheetId: this.spreadsheetId,
+        fields: "sheets(properties(sheetId,title),protectedRanges(protectedRangeId,description))",
+      })
+    );
+    const sheet = spreadsheet.data.sheets?.find((s) => s.properties?.title === sheetName);
+    if (!sheet || sheet.properties?.sheetId === undefined || sheet.properties?.sheetId === null) {
+      throw new Error(`Sheet "${sheetName}" no encontrada en el archivo`);
+    }
+    const sheetId = sheet.properties.sheetId;
+
+    const previousIds = (sheet.protectedRanges ?? [])
+      .filter((r) => r.description === "dpp:invoices-lock")
+      .map((r) => r.protectedRangeId)
+      .filter((id): id is number => typeof id === "number");
+
+    const requests: sheets_v4.Schema$Request[] = previousIds.map((id) => ({
+      deleteProtectedRange: { protectedRangeId: id },
+    }));
+
+    requests.push({
+      addProtectedRange: {
+        protectedRange: {
+          range: {
+            sheetId,
+            startRowIndex: 0,
+            startColumnIndex: 0,
+            endColumnIndex,
+          },
+          description: "dpp:invoices-lock",
+          warningOnly: false,
+          editors: { users: [serviceAccountEmail], groups: [], domainUsersCanEdit: false },
+        },
+      },
+    });
+
+    const response = await this.withRetry(() =>
+      this.sheets.spreadsheets.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: { requests },
+      })
+    );
+
+    // El último reply corresponde al addProtectedRange
+    const replies = response.data.replies ?? [];
+    const last = replies[replies.length - 1];
+    return last?.addProtectedRange?.protectedRange?.protectedRangeId ?? 0;
   }
 }

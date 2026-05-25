@@ -244,6 +244,68 @@ export default function ConsortiumsPage() {
     } finally { setBusyAction(null); }
   };
 
+  const handleSyncPayments = async () => {
+    setBusyAction("syncPayments"); setToolbarError(null); setToolbarInfo(null);
+    try {
+      const res = await guardedFetch("/api/client/sync-payments", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      const counts = `Creados: ${data.paymentsCreated ?? 0} | Actualizados: ${data.paymentsUpdated ?? 0} | Boletas: ${data.invoicesAffected ?? 0}`;
+      setToolbarInfo(`Pagos sincronizados. ${counts}`);
+      if (selectedId && selectedPeriod) {
+        void fetchInvoices(selectedId, selectedPeriod.id);
+      }
+    } catch (err) {
+      setToolbarError(err instanceof Error ? err.message : "Error");
+    } finally { setBusyAction(null); }
+  };
+
+  const handleSetupSheetProtection = async () => {
+    setBusyAction("protectSheet"); setToolbarError(null); setToolbarInfo(null);
+    try {
+      const res = await guardedFetch("/api/client/setup-sheet-protection", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      const syncInfo = data.sync
+        ? ` Sync previo: ${data.sync.paymentsCreated} creados, ${data.sync.paymentsUpdated} actualizados.`
+        : "";
+      setToolbarInfo(`Hoja protegida (${data.columnsProtected ?? 0} columnas).${syncInfo}`);
+      if (selectedId && selectedPeriod) {
+        void fetchInvoices(selectedId, selectedPeriod.id);
+      }
+    } catch (err) {
+      setToolbarError(err instanceof Error ? err.message : "Error");
+    } finally { setBusyAction(null); }
+  };
+
+  const handleUnprotectSheet = async () => {
+    if (!window.confirm(
+      "Vas a desproteger la hoja. Vas a poder editar las columnas en Google Sheets " +
+      "directamente. Recordá apretar 'Proteger hoja' cuando termines — eso disparará " +
+      "una sincronización automática para volcar tus cambios a la base.\n\n¿Continuar?"
+    )) return;
+
+    setBusyAction("unprotectSheet"); setToolbarError(null); setToolbarInfo(null);
+    try {
+      const res = await guardedFetch("/api/client/setup-sheet-protection", {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setToolbarInfo(
+        data.removedRanges > 0
+          ? `Hoja desprotegida. Acordate de re-bloquearla cuando termines.`
+          : `La hoja ya estaba desprotegida.`
+      );
+    } catch (err) {
+      setToolbarError(err instanceof Error ? err.message : "Error");
+    } finally { setBusyAction(null); }
+  };
+
   const handleLogout = async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -381,6 +443,174 @@ export default function ConsortiumsPage() {
   const [lspError, setLspError] = useState<string | null>(null);
   const [deletingLspId, setDeletingLspId] = useState<string | null>(null);
   const [confirmDeleteLspId, setConfirmDeleteLspId] = useState<string | null>(null);
+
+  // Payment modal — soporta dos modos según PaymentRepository:
+  //   Modo A (cuotas pactadas): primer pago define totalInstallments. El backend calcula
+  //     el monto fijo como amount/totalInstallments. El installmentNumber arranca en 1 y
+  //     autoincrementa. Última cuota absorbe redondeo.
+  //   Modo B (libre): sin totalInstallments. El usuario fija el monto cada vez.
+  //   El modo se fija en el primer pago y NO se puede cambiar después.
+  type PaymentMode = "cuotas" | "libre";
+  type PaymentRecord = {
+    id: string; amount: string | number; paymentDate: string;
+    installmentNumber: number | null; totalInstallments: number | null;
+    paymentMethod: string | null; driveFileUrl: string | null; observation: string | null;
+  };
+
+  const [payModalInvoice, setPayModalInvoice] = useState<Invoice | null>(null);
+  const [existingPayments, setExistingPayments] = useState<PaymentRecord[]>([]);
+  const [loadingExistingPayments, setLoadingExistingPayments] = useState(false);
+  // Modo elegido en primer pago — solo aplica cuando existingPayments.length === 0
+  const [chosenMode, setChosenMode] = useState<PaymentMode>("libre");
+  const [payForm, setPayForm] = useState({
+    amount: "",
+    paymentDate: todayInputDate(),
+    totalInstallments: "",
+    paymentMethod: "",
+    observation: "",
+  });
+  const [payFile, setPayFile] = useState<File | null>(null);
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
+  const payFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Derivados del modo activo
+  const activeMode: PaymentMode | null = existingPayments.length === 0
+    ? null
+    : existingPayments[0].totalInstallments !== null ? "cuotas" : "libre";
+  const effectiveMode: PaymentMode = activeMode ?? chosenMode;
+  const isFirstPayment = existingPayments.length === 0;
+  const installmentsLocked = existingPayments[0]?.totalInstallments ?? null;
+  const currentInstallmentNumber = installmentsLocked ? existingPayments.length + 1 : null;
+  const isLastInstallment = installmentsLocked !== null && currentInstallmentNumber === installmentsLocked;
+  const invoiceAmount = Number(payModalInvoice?.amount ?? 0);
+  const invoiceRemaining = payModalInvoice?.remainingBalance !== null && payModalInvoice?.remainingBalance !== undefined
+    ? Number(payModalInvoice.remainingBalance)
+    : invoiceAmount;
+
+  // Monto que efectivamente se va a registrar (lo calculamos siempre para mostrarlo,
+  // aunque en cuotas el backend lo recalcula)
+  let computedAmount = 0;
+  if (effectiveMode === "cuotas") {
+    if (isLastInstallment) {
+      computedAmount = invoiceRemaining;
+    } else {
+      const total = installmentsLocked ?? (Number(payForm.totalInstallments) || 0);
+      computedAmount = total > 0 ? Number((invoiceAmount / total).toFixed(2)) : 0;
+    }
+  } else {
+    computedAmount = Number(payForm.amount) || 0;
+  }
+
+  const handleOpenPayModal = async (inv: Invoice) => {
+    setPayModalInvoice(inv);
+    setPayFile(null);
+    setPayError(null);
+    setChosenMode("libre");
+    setPayForm({
+      amount: String(inv.remainingBalance ?? inv.amount ?? ""),
+      paymentDate: todayInputDate(),
+      totalInstallments: "",
+      paymentMethod: "",
+      observation: "",
+    });
+    setExistingPayments([]);
+    setLoadingExistingPayments(true);
+    try {
+      const res = await guardedFetch(`/api/client/invoices/${inv.id}/payments`, { cache: "no-store" });
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.payments)) {
+        setExistingPayments(data.payments);
+      }
+    } catch { /* silent — sin historial seguimos como primer pago */ }
+    finally { setLoadingExistingPayments(false); }
+  };
+
+  const handleClosePayModal = () => {
+    if (savingPayment) return;
+    setPayModalInvoice(null);
+    setPayFile(null);
+    setPayError(null);
+    setExistingPayments([]);
+  };
+
+  const handleSubmitPayment = async () => {
+    if (!payModalInvoice) return;
+    if (!payForm.paymentDate) { setPayError("La fecha es obligatoria"); return; }
+
+    let amountToSend = 0;
+    let installmentsToSend: number | null = null;
+
+    if (effectiveMode === "cuotas") {
+      // Modo cuotas
+      if (installmentsLocked !== null) {
+        // Continuar serie iniciada: backend ignora amount y deriva del totalInstallments existente
+        installmentsToSend = installmentsLocked;
+        amountToSend = computedAmount; // valor informativo; el backend lo recalcula
+      } else {
+        // Primer pago en cuotas: el usuario eligió cantidad
+        const inst = Number(payForm.totalInstallments);
+        if (!Number.isInteger(inst) || inst < 2) {
+          setPayError("Las cuotas deben ser un entero mayor o igual a 2"); return;
+        }
+        installmentsToSend = inst;
+        amountToSend = computedAmount;
+      }
+    } else {
+      // Modo libre
+      amountToSend = Number(payForm.amount);
+      if (!Number.isFinite(amountToSend) || amountToSend <= 0) {
+        setPayError("El monto debe ser un número positivo"); return;
+      }
+    }
+
+    setSavingPayment(true);
+    setPayError(null);
+    try {
+      const formData = new FormData();
+      formData.append("amount", String(amountToSend));
+      formData.append("paymentDate", payForm.paymentDate);
+      if (installmentsToSend && isFirstPayment) {
+        formData.append("totalInstallments", String(installmentsToSend));
+      }
+      if (payForm.paymentMethod) formData.append("paymentMethod", payForm.paymentMethod);
+      if (payForm.observation) formData.append("observation", payForm.observation);
+      if (payFile) formData.append("receipt", payFile);
+
+      const res = await fetch(`/api/client/invoices/${payModalInvoice.id}/payments`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+
+      setPayModalInvoice(null);
+      setPayFile(null);
+      setExistingPayments([]);
+      if (selectedId && selectedPeriod) void fetchInvoices(selectedId, selectedPeriod.id);
+    } catch (err) {
+      setPayError(err instanceof Error ? err.message : "Error al registrar el pago");
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  // ─── Modal Ver pagos (read-only para invoice.isPaid) ───
+  const [viewPaymentsInvoice, setViewPaymentsInvoice] = useState<Invoice | null>(null);
+  const [viewPaymentsList, setViewPaymentsList] = useState<PaymentRecord[]>([]);
+  const [loadingViewPayments, setLoadingViewPayments] = useState(false);
+
+  const handleOpenViewPayments = async (inv: Invoice) => {
+    setViewPaymentsInvoice(inv);
+    setViewPaymentsList([]);
+    setLoadingViewPayments(true);
+    try {
+      const res = await guardedFetch(`/api/client/invoices/${inv.id}/payments`, { cache: "no-store" });
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.payments)) setViewPaymentsList(data.payments);
+    } catch { /* silent */ }
+    finally { setLoadingViewPayments(false); }
+  };
 
   const fetchConsortiums = useCallback(async () => {
     setLoadingList(true); setListError(null);
@@ -773,6 +1003,24 @@ export default function ConsortiumsPage() {
             <span className={styles.navSidebarItemIcon}>🔄</span>
             {!navCollapsed && <span className={styles.navSidebarItemLabel}>{busyAction === "sync" ? "Sincronizando..." : "Sincronizar directorio"}</span>}
           </button>
+          {isClient && (
+            <button type="button" className={styles.navSidebarItem} onClick={() => { handleSyncPayments(); setNavMobileOpen(false); }} disabled={busyAction !== null} title="Lee la hoja PAGOS del Sheets y actualiza los pagos en la base">
+              <span className={styles.navSidebarItemIcon}>💵</span>
+              {!navCollapsed && <span className={styles.navSidebarItemLabel}>{busyAction === "syncPayments" ? "Sincronizando..." : "Sincronizar pagos"}</span>}
+            </button>
+          )}
+          {isClient && (
+            <button type="button" className={styles.navSidebarItem} onClick={() => { handleSetupSheetProtection(); setNavMobileOpen(false); }} disabled={busyAction !== null} title="Sincroniza pagos pendientes y protege las columnas A:U de la hoja de boletas">
+              <span className={styles.navSidebarItemIcon}>🔒</span>
+              {!navCollapsed && <span className={styles.navSidebarItemLabel}>{busyAction === "protectSheet" ? "Protegiendo..." : "Proteger hoja"}</span>}
+            </button>
+          )}
+          {isClient && (
+            <button type="button" className={styles.navSidebarItem} onClick={() => { handleUnprotectSheet(); setNavMobileOpen(false); }} disabled={busyAction !== null} title="Desbloquea la hoja para editarla manualmente en casos puntuales">
+              <span className={styles.navSidebarItemIcon}>🔓</span>
+              {!navCollapsed && <span className={styles.navSidebarItemLabel}>{busyAction === "unprotectSheet" ? "Desprotegiendo..." : "Desproteger hoja"}</span>}
+            </button>
+          )}
           <button type="button" className={styles.navSidebarItem} disabled={!consortiumsEnabled} title={!consortiumsEnabled ? "Función Premium" : undefined}>
             <span className={styles.navSidebarItemIcon}>🏢</span>
             {!navCollapsed && (
@@ -1064,13 +1312,35 @@ export default function ConsortiumsPage() {
                             {/* ── Columna pago ── */}
                             <td>
                               {inv.isPaid ? (
-                                <span className={styles.badgeOk}>Pagada</span>
-                              ) : inv.remainingBalance !== null ? (
-                                <span className={styles.badgeWarning}>
-                                  Resta ${Number(inv.remainingBalance).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                                </span>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <span className={styles.badgeOk}>Pagada</span>
+                                  <button
+                                    type="button"
+                                    className={styles.ghostBtn}
+                                    style={{ padding: "4px 10px", fontSize: 12 }}
+                                    onClick={() => handleOpenViewPayments(inv)}
+                                    title="Ver historial de pagos"
+                                  >
+                                    Ver pagos
+                                  </button>
+                                </div>
                               ) : (
-                                <span>—</span>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  {inv.remainingBalance !== null && (
+                                    <span className={styles.badgeWarning}>
+                                      Resta ${Number(inv.remainingBalance).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className={styles.addInvoiceBtn}
+                                    style={{ padding: "4px 10px", fontSize: 12 }}
+                                    onClick={() => handleOpenPayModal(inv)}
+                                    title="Registrar pago"
+                                  >
+                                    Pagar
+                                  </button>
+                                </div>
                               )}
                             </td>
                           </tr>
@@ -1516,6 +1786,242 @@ export default function ConsortiumsPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Payment modal ── */}
+      {payModalInvoice && (
+        <div className={styles.modalOverlay} onClick={handleClosePayModal}>
+          <div className={styles.modalLarge} onClick={(e) => e.stopPropagation()}>
+            <h3 className={styles.modalTitle}>Registrar pago</h3>
+            <p className={styles.modalSubtitle}>
+              {payModalInvoice.provider ?? "—"} — {payModalInvoice.boletaNumber ?? "—"}
+              {payModalInvoice.amount !== null && (
+                <> · Importe: {formatAmount(payModalInvoice.amount)}</>
+              )}
+              {payModalInvoice.remainingBalance !== null && !payModalInvoice.isPaid && (
+                <> · Saldo: {formatAmount(payModalInvoice.remainingBalance)}</>
+              )}
+            </p>
+
+            {loadingExistingPayments && (
+              <p style={{ fontSize: 12, opacity: 0.6 }}>Cargando historial de pagos...</p>
+            )}
+
+            {/* Banner del modo activo si NO es primer pago */}
+            {!loadingExistingPayments && !isFirstPayment && (
+              <div style={{
+                padding: "10px 14px", borderRadius: 8,
+                background: activeMode === "cuotas" ? "rgba(99, 162, 255, 0.12)" : "rgba(255, 184, 114, 0.12)",
+                border: `1px solid ${activeMode === "cuotas" ? "rgba(99, 162, 255, 0.35)" : "rgba(255, 184, 114, 0.35)"}`,
+                fontSize: 13, marginTop: 8,
+              }}>
+                {activeMode === "cuotas" ? (
+                  <>
+                    <strong>Modo cuotas pactadas</strong> · Cuota {currentInstallmentNumber} de {installmentsLocked}
+                    {isLastInstallment && (
+                      <span style={{ display: "block", marginTop: 4, fontSize: 12, opacity: 0.85 }}>
+                        Última cuota — absorbe diferencias de redondeo.
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <><strong>Modo pago libre</strong> · Ya hay {existingPayments.length} pago(s) registrado(s)</>
+                )}
+              </div>
+            )}
+
+            {/* Toggle de modo si es PRIMER pago */}
+            {!loadingExistingPayments && isFirstPayment && (
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button type="button"
+                  className={effectiveMode === "libre" ? styles.addInvoiceBtn : styles.ghostBtn}
+                  style={{ flex: 1 }}
+                  onClick={() => setChosenMode("libre")}
+                  disabled={savingPayment}
+                >
+                  Pago libre
+                </button>
+                <button type="button"
+                  className={effectiveMode === "cuotas" ? styles.addInvoiceBtn : styles.ghostBtn}
+                  style={{ flex: 1 }}
+                  onClick={() => setChosenMode("cuotas")}
+                  disabled={savingPayment}
+                >
+                  Pagar en cuotas
+                </button>
+              </div>
+            )}
+
+            {payError && <p className={styles.errorMsg} style={{ marginTop: 8 }}>{payError}</p>}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+              {/* Campo cant cuotas — solo visible para PRIMER pago en modo cuotas */}
+              {isFirstPayment && effectiveMode === "cuotas" && (
+                <label>
+                  <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>
+                    Cantidad de cuotas
+                  </span>
+                  <input
+                    type="number"
+                    min="2"
+                    step="1"
+                    className={styles.formInput}
+                    placeholder="ej. 3"
+                    value={payForm.totalInstallments}
+                    onChange={(e) => setPayForm((f) => ({ ...f, totalInstallments: e.target.value }))}
+                    disabled={savingPayment}
+                  />
+                </label>
+              )}
+
+              {/* Monto — editable en modo libre, readonly en cuotas (autocalculado) */}
+              <label>
+                <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>
+                  Monto pagado
+                  {effectiveMode === "cuotas" && (
+                    <span style={{ fontWeight: 400, opacity: 0.6 }}> (calculado automáticamente)</span>
+                  )}
+                </span>
+                {effectiveMode === "cuotas" ? (
+                  <input
+                    type="text"
+                    className={styles.formInput}
+                    value={computedAmount > 0 ? formatAmount(computedAmount) : "—"}
+                    readOnly
+                    disabled
+                  />
+                ) : (
+                  <input
+                    type="number"
+                    step="0.01"
+                    className={styles.formInput}
+                    value={payForm.amount}
+                    onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))}
+                    disabled={savingPayment}
+                  />
+                )}
+              </label>
+
+              <label>
+                <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>Fecha de pago</span>
+                <input
+                  type="date"
+                  className={styles.formInput}
+                  value={payForm.paymentDate}
+                  onChange={(e) => setPayForm((f) => ({ ...f, paymentDate: e.target.value }))}
+                  disabled={savingPayment}
+                />
+              </label>
+
+              <label>
+                <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>Medio de pago</span>
+                <input
+                  type="text"
+                  className={styles.formInput}
+                  placeholder="Transferencia / Cheque / Efectivo..."
+                  value={payForm.paymentMethod}
+                  onChange={(e) => setPayForm((f) => ({ ...f, paymentMethod: e.target.value }))}
+                  disabled={savingPayment}
+                />
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>Observación (opcional)</span>
+                <input
+                  type="text"
+                  className={styles.formInput}
+                  value={payForm.observation}
+                  onChange={(e) => setPayForm((f) => ({ ...f, observation: e.target.value }))}
+                  disabled={savingPayment}
+                />
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>Comprobante PDF (opcional)</span>
+                <input
+                  ref={payFileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  className={styles.formInput}
+                  onChange={(e) => setPayFile(e.target.files?.[0] ?? null)}
+                  disabled={savingPayment}
+                />
+                {payFile && (
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>
+                    {payFile.name} ({(payFile.size / 1024).toFixed(1)} KB)
+                  </span>
+                )}
+              </label>
+            </div>
+
+            <div className={styles.modalActions} style={{ marginTop: 16 }}>
+              <button type="button" className={styles.ghostBtn} onClick={handleClosePayModal} disabled={savingPayment}>
+                Cancelar
+              </button>
+              <button type="button" className={styles.addInvoiceBtn} onClick={handleSubmitPayment} disabled={savingPayment || loadingExistingPayments}>
+                {savingPayment ? "Guardando..." : "Registrar pago"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Ver pagos modal (read-only) ── */}
+      {viewPaymentsInvoice && (
+        <div className={styles.modalOverlay} onClick={() => setViewPaymentsInvoice(null)}>
+          <div className={styles.modalLarge} onClick={(e) => e.stopPropagation()}>
+            <h3 className={styles.modalTitle}>Historial de pagos</h3>
+            <p className={styles.modalSubtitle}>
+              {viewPaymentsInvoice.provider ?? "—"} — {viewPaymentsInvoice.boletaNumber ?? "—"}
+              {viewPaymentsInvoice.amount !== null && (
+                <> · Importe total: {formatAmount(viewPaymentsInvoice.amount)}</>
+              )}
+            </p>
+
+            {loadingViewPayments ? (
+              <p style={{ fontSize: 12, opacity: 0.6 }}>Cargando...</p>
+            ) : viewPaymentsList.length === 0 ? (
+              <p style={{ fontSize: 13, opacity: 0.7 }}>Esta boleta no tiene pagos registrados.</p>
+            ) : (
+              <div className={styles.tableWrap} style={{ marginTop: 12 }}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Tipo</th>
+                      <th>Fecha</th>
+                      <th>Monto</th>
+                      <th>Medio</th>
+                      <th>Comprobante</th>
+                      <th>Observación</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {viewPaymentsList.map((p) => (
+                      <tr key={p.id}>
+                        <td>
+                          {p.totalInstallments
+                            ? <span className={styles.badgeOk}>Cuota {p.installmentNumber}/{p.totalInstallments}</span>
+                            : <span className={styles.badgeManual}>Libre</span>}
+                        </td>
+                        <td>{formatDate(p.paymentDate)}</td>
+                        <td className={styles.tdAmount}>{formatAmount(Number(p.amount))}</td>
+                        <td>{p.paymentMethod ?? "—"}</td>
+                        <td>
+                          {p.driveFileUrl
+                            ? <a href={p.driveFileUrl} target="_blank" rel="noopener noreferrer" className={styles.fileLink}>Ver PDF</a>
+                            : "—"}
+                        </td>
+                        <td className={styles.tdDetail}>{p.observation ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className={styles.modalActions} style={{ marginTop: 16 }}>
+              <button type="button" className={styles.ghostBtn} onClick={() => setViewPaymentsInvoice(null)}>Cerrar</button>
+            </div>
           </div>
         </div>
       )}
