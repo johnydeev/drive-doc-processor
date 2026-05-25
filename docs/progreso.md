@@ -14,6 +14,29 @@ La cadena de extracción IA ahora soporta tres proveedores: **Gemini → OpenAI 
 
 ## Completado ✅
 
+- **Hardening del workflow de deploy (CI/CD)** (21/05/2026)
+  - **Crítica #1 — `set -euo pipefail`:** agregado al inicio de ambos
+    scripts `run: |` del job `deploy` (steps "Write env file" y "Build and
+    restart"). Antes, un `prisma migrate deploy` fallido no abortaba el
+    script — los containers nuevos se levantaban contra DB vieja y el job
+    reportaba ✅. Ahora cualquier falla en el script aborta inmediatamente
+    y el job reporta ❌ explícitamente; los containers viejos siguen
+    corriendo con la versión anterior (sin sorpresas en producción).
+  - **Crítica #2 — `docker login --password-stdin`:** el token GHCR ya no
+    aparece como argumento de comando (`ps aux`, `/proc/<pid>/cmdline`,
+    warnings de Docker). Llega vía pipe desde la env var `GHCR_TOKEN`.
+  - **Crítica #3 — `.env` desde GitHub Secret `PROD_ENV_FILE`:** el step
+    "Copy env file" con path hardcodeado
+    (`C:\Users\jony\...\drive-doc-processor\.env`) fue reemplazado por
+    un step que lee `secrets.PROD_ENV_FILE` y lo escribe con `printf`.
+    Validación previa: si el secret no está configurado, aborta con
+    `::error::` accionable. Funciona desde cualquier runner.
+  - **Acción manual hecha:** secret `PROD_ENV_FILE` configurado en GitHub
+    `Settings → Secrets and variables → Actions` con el contenido del
+    `.env` de producción.
+  - Ambos steps ahora declaran `shell: bash` explícito (necesario para
+    `set -euo pipefail` en self-hosted Windows runner).
+
 - **Sistema de pagos: modal UI + sync Sheets→DB sobre la misma fila** (21/05/2026)
   - **6 columnas nuevas** en la hoja de boletas (auto-cubiertas por el header
     del pipeline y por el endpoint de pagos):

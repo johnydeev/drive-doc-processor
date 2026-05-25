@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Security / CI
+- **Hardening del workflow de deploy (2026-05-21)**. Tres fixes críticos
+  aplicados a `.github/workflows/ci.yml`, job `deploy`:
+  - **`set -euo pipefail`** al inicio de los scripts `run: |` (steps
+    "Write env file" y "Build and restart"). Sin esto, un `prisma migrate
+    deploy` fallido **no abortaba el script** — los pasos siguientes
+    (`docker compose up -d --force-recreate`) seguían ejecutándose y los
+    containers nuevos arrancaban con código nuevo contra schema viejo de
+    DB. Era una falla silenciosa: el job de GHA reportaba ✅ pero
+    producción quedaba rota. Con `-e` el script aborta inmediatamente,
+    los containers viejos siguen corriendo, y el job reporta ❌
+    explícitamente.
+  - **`docker login --password-stdin`** en vez de `-p $TOKEN`. El token
+    ya no aparece como argumento de proceso (visible en `ps aux`,
+    `/proc/<pid>/cmdline`, warnings de Docker). Llega vía pipe desde la
+    env var `GHCR_TOKEN`. Defense in depth — los scanners de seguridad
+    flagean el patrón `-p` como CWE-214.
+  - **`.env` desde GitHub Secret `PROD_ENV_FILE`** en vez de
+    `copy` desde un path hardcodeado del runner
+    (`C:\Users\jony\...\drive-doc-processor\.env`). El path apuntaba a
+    una carpeta de un proyecto distinto al actual y solo funcionaba en
+    una máquina. Ahora el contenido del `.env` vive en GitHub Secrets
+    (cifrado at rest, enmascarado en logs), es editable desde la UI de
+    GitHub, y funciona desde cualquier runner. Si el secret no está
+    configurado, el job falla con error explícito en vez de seguir con
+    `.env` faltante.
+
+  **Migración manual requerida:** crear el secret `PROD_ENV_FILE` en
+  `Settings → Secrets and variables → Actions` con el contenido completo
+  del `.env` de producción antes del próximo push a master.
+
 ### Added
 - **Feature: Pagos vía Sheets + modal UI con upload de PDF (2026-05-21)**.
   Sistema híbrido para registrar pagos sobre la misma fila de la boleta en la

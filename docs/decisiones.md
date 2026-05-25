@@ -4,6 +4,127 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-21 — Hardening del workflow de deploy (3 fixes críticos)
+
+### Problema
+
+Revisión del workflow `.github/workflows/ci.yml` (job `deploy`) detectó
+tres riesgos operativos / de seguridad:
+
+1. **Silent deploy failure.** El bloque `run: |` del step "Build and
+   restart" no tenía `set -e`. Bash por defecto **no aborta** si un
+   comando falla — solo el último comando determina el exit code del
+   script. Concretamente, si `prisma migrate deploy` fallaba (ej.
+   migración con conflicto, DB inaccesible, schema corrupto), los
+   comandos siguientes (`docker compose up -d --force-recreate`) se
+   ejecutaban igual. El resultado era:
+   - Containers nuevos corriendo código que esperaba schema nuevo.
+   - DB con schema viejo.
+   - Job de GitHub Actions reportando ✅ (porque `docker image prune -f`
+     al final salía con 0).
+   - Cualquier query a las columnas nuevas explotaba con `column "X"
+     does not exist`.
+   - Producción rota silenciosamente hasta que un usuario reportaba el
+     bug, o hasta el siguiente deploy si las migraciones eran
+     acumulativas.
+
+2. **Token expuesto en argumento de comando.** El step usaba
+   `docker login ghcr.io -u johnydeev -p ${{ secrets.GITHUB_TOKEN }}`.
+   GitHub Actions enmascara el valor del secret en los logs visibles,
+   pero el token como argumento de comando queda accesible en:
+   - `ps aux` / `/proc/<pid>/cmdline` para otros procesos del host
+     (relevante porque el runner es self-hosted en una máquina que
+     puede correr otros procesos).
+   - Warnings del propio Docker: `WARNING! Using --password via the CLI
+     is insecure. Use --password-stdin.`
+   - Screenshots / screen-shares accidentales durante debugging.
+   - Security scanners (Snyk, GitGuardian, Trivy) lo flagean como
+     CWE-214 (Invocation of Process Using Visible Sensitive Information).
+
+3. **Path hardcodeado del `.env`.** El step "Copy env file" usaba
+   `copy "C:\Users\jony\Desktop\Proyectos Para vender\pdf-drive-procesor\drive-doc-processor\.env" .env`.
+   Tres fragilidades acumuladas:
+   - El path dice `drive-doc-processor` (proyecto anterior), no
+     `ia-drive-doc-processor` (proyecto actual). Posiblemente el `.env`
+     estaba siendo reciclado de un fork.
+   - Acoplado a una única máquina (la del usuario `jony`). Imposible
+     correr el runner en una segunda máquina sin reconfigurar.
+   - El `cmd` `copy` falla silenciosamente si el destino tiene
+     problemas → potencialmente deployando con `.env` desactualizado o
+     inexistente sin alerta.
+
+### Decisión
+
+**Fix 1 — `set -euo pipefail`** al inicio de ambos scripts `run: |`
+(steps "Write env file" y "Build and restart"). Flags:
+- `-e` (errexit): aborta si cualquier comando devuelve exit ≠ 0.
+- `-u` (nounset): aborta si se referencia variable no definida (atrapa
+  typos en `$IMAGE_TGA` etc.).
+- `-o pipefail`: en pipes, el exit code refleja el primer fallo (no solo
+  el último comando).
+
+Adicionalmente, agregar `shell: bash` explícito porque los runners
+self-hosted en Windows pueden defaultear a `pwsh` o `cmd` donde
+`set -euo pipefail` no aplica.
+
+**Fix 2 — `docker login --password-stdin`**. El token llega vía pipe
+desde una env var:
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u johnydeev --password-stdin
+```
+
+El token solo existe en memoria del proceso por los milisegundos que
+Docker lo lee del pipe. Ya no aparece en `ps aux` ni warnings de Docker.
+
+**Fix 3 — `.env` desde GitHub Secret `PROD_ENV_FILE`**. Step nuevo que
+escribe el `.env` decodificando un secret del repositorio:
+
+```bash
+printf '%s' "$PROD_ENV" > .env
+```
+
+Validación previa: si el secret no está configurado, el script aborta
+con `::error::` y mensaje accionable indicando dónde configurarlo.
+Beneficios:
+- Sin path frágil.
+- Funciona desde cualquier runner.
+- Cambiar variables = editar secret en GitHub UI.
+- GitHub trackea quién modifica secrets y cuándo.
+- Cifrado at rest, enmascarado en logs.
+
+### Alternativas descartadas
+
+- **Quick fix sin GH UI (Opción A):** dejar el archivo en disco pero
+  hacer el path configurable vía variable de entorno del runner con
+  verificación de existencia. Resuelve la fragilidad de path absoluto
+  pero mantiene el `.env` en disco plano y sigue acoplado a la máquina.
+  Rechazada por ser solo parcialmente correcta.
+- **Secret manager externo (Opción C):** Doppler / Vault / AWS Secrets
+  Manager. Útil si hubiera múltiples entornos (dev/staging/prod) o
+  varios proyectos compartiendo secrets. Overkill para este proyecto
+  con un único entorno.
+- **Conservar el `-p $TOKEN`** porque "GHA enmascara los logs":
+  insuficiente — el masking solo aplica a los logs visibles de GHA web,
+  no a `ps aux` del host self-hosted, ni a screenshots, ni evita el
+  warning de Docker en los logs.
+
+### Impacto
+
+- `.github/workflows/ci.yml`:
+  - Step "Copy env file" eliminado, reemplazado por "Write env file from
+    GitHub Secret".
+  - Step "Build and restart" ahora con `shell: bash`, `set -euo pipefail`
+    y `--password-stdin`.
+- **Acción manual requerida una vez:** crear el secret
+  `PROD_ENV_FILE` en `Settings → Secrets and variables → Actions` con
+  el contenido completo del `.env` de producción.
+- **El archivo viejo** `C:\...\drive-doc-processor\.env` queda
+  desacoplado del CI — puede eliminarse del disco después de verificar
+  el primer deploy exitoso.
+
+---
+
 ## 2026-05-21 — Sistema de pagos: modal UI + sincronización Sheets→DB sobre la misma fila
 
 ### Problema
