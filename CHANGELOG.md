@@ -3,6 +3,31 @@
 ## [Unreleased]
 
 ### Security / CI
+- **Fix: scripts del job `deploy` reescritos en PowerShell (2026-05-21)**.
+  El primer intento de los 3 fixes críticos (commit anterior) usaba
+  `shell: bash`, pero el runner self-hosted Windows no tiene
+  `/bin/bash` instalado — el step "Write env file" murió con
+  `execvpe(/bin/bash) failed: No such file or directory`. Reescritos en
+  `shell: powershell` (Windows PowerShell 5.1, mismo que ya usa el step
+  "Wait for healthy (Windows)" del workflow):
+  - **Crítica #1 — abort on failure:** PowerShell con
+    `$ErrorActionPreference = 'Stop'` solo aborta en cmdlets, no en
+    native commands (`docker`, `npx`). Para cubrir esos casos se
+    definió un helper `Invoke-Step "<name>" { <body> }` que ejecuta el
+    bloque y hace `throw` si `$LASTEXITCODE -ne 0`. Equivalente
+    funcional a `set -euo pipefail` para native commands. Cada paso
+    (login, pull, tag, migrate, up, prune) está envuelto en
+    `Invoke-Step` con label legible que aparece en los logs como
+    `==> prisma migrate deploy`.
+  - **Crítica #2 — `--password-stdin`:** sin cambios funcionales,
+    `$env:GHCR_TOKEN | docker login --password-stdin` funciona idéntico
+    al pipe de bash.
+  - **Crítica #3 — `.env` desde GitHub Secret:** validación con
+    `[string]::IsNullOrWhiteSpace($env:PROD_ENV)`. Escritura con
+    `[System.IO.File]::WriteAllText("$PWD\.env", $env:PROD_ENV)` para
+    evitar el BOM UTF-16 que Windows PowerShell agregaría con
+    `Out-File`/`Set-Content` por defecto (docker compose no parsea bien
+    `.env` con BOM). `chmod 600` eliminado — no aplica en NTFS.
 - **Hardening del workflow de deploy (2026-05-21)**. Tres fixes críticos
   aplicados a `.github/workflows/ci.yml`, job `deploy`:
   - **`set -euo pipefail`** al inicio de los scripts `run: |` (steps

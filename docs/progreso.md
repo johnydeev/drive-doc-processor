@@ -14,6 +14,18 @@ La cadena de extracción IA ahora soporta tres proveedores: **Gemini → OpenAI 
 
 ## Completado ✅
 
+- **Fix: scripts del deploy reescritos en PowerShell** (21/05/2026)
+  - Primer intento del hardening usaba `shell: bash` y falló en CI run #52
+    porque el runner self-hosted Windows no tiene `/bin/bash`. Reescritos
+    en `shell: powershell` (PS 5.1, mismo que ya usa "Wait for healthy").
+  - Helper `Invoke-Step "<name>" { <body> }` que envuelve cada native
+    command y hace `throw` si `$LASTEXITCODE -ne 0`. Equivalente
+    funcional a `set -e` para comandos como `docker` y `npx`.
+  - `.env` se escribe con `[System.IO.File]::WriteAllText` para evitar el
+    BOM UTF-16 que `Out-File`/`Set-Content` agregan por defecto en
+    Windows PowerShell 5.1 (rompe el parser de `env_file` de docker compose).
+  - `chmod 600` eliminado — NTFS no respeta permisos POSIX.
+
 - **Hardening del workflow de deploy (CI/CD)** (21/05/2026)
   - **Crítica #1 — `set -euo pipefail`:** agregado al inicio de ambos
     scripts `run: |` del job `deploy` (steps "Write env file" y "Build and

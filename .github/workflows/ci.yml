@@ -78,38 +78,60 @@ jobs:
       # en vez de copiarse desde un path hardcodeado en el runner. Requiere
       # configurar el secret en Settings → Secrets and variables → Actions.
       - name: Write env file from GitHub Secret
-        shell: bash
+        shell: powershell
         env:
           PROD_ENV: ${{ secrets.PROD_ENV_FILE }}
         run: |
-          set -euo pipefail
-          if [ -z "${PROD_ENV:-}" ]; then
-            echo "::error::Secret 'PROD_ENV_FILE' no está configurado en el repositorio."
-            echo "Configurarlo en: Settings → Secrets and variables → Actions → New repository secret"
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:PROD_ENV)) {
+            Write-Host "::error::Secret 'PROD_ENV_FILE' no esta configurado en el repositorio."
+            Write-Host "Configurarlo en: Settings -> Secrets and variables -> Actions -> New repository secret"
             exit 1
-          fi
-          printf '%s' "$PROD_ENV" > .env
-          chmod 600 .env 2>/dev/null || true
-          echo "::notice::.env escrito desde secret ($(wc -l < .env) líneas)"
+          }
+          # WriteAllText evita BOM y normaliza newlines; docker compose tolera CRLF en env_file
+          [System.IO.File]::WriteAllText("$PWD\.env", $env:PROD_ENV)
+          $lines = (Get-Content .env | Measure-Object -Line).Lines
+          Write-Host "::notice::.env escrito desde secret ($lines lineas)"
 
-      # Crítica #1: set -euo pipefail aborta el script si cualquier comando
-      # falla (especialmente la migración). Sin esto, un migrate deploy fallido
-      # no impide que se levanten containers con código nuevo contra DB vieja.
-      # Crítica #2: docker login usa --password-stdin para no exponer el token
-      # como argumento de línea de comando (visible en ps aux, /proc, etc.).
+      # Crítica #1: aborta el script si cualquier comando falla. PowerShell con
+      # $ErrorActionPreference='Stop' solo cubre cmdlets — los exit codes de
+      # native commands (docker, npx) hay que chequearlos manualmente con
+      # $LASTEXITCODE. Sin esto, un migrate deploy fallido no impedia que se
+      # levantaran containers con codigo nuevo contra DB vieja (silent failure).
+      # Crítica #2: docker login con --password-stdin para no exponer el token
+      # como argumento de comando (ps, /proc, warnings de docker).
       - name: Build and restart
-        shell: bash
+        shell: powershell
         env:
           IMAGE_TAG: ${{ github.sha }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u johnydeev --password-stdin
-          docker pull ghcr.io/johnydeev/ia-drive-doc-processor:${{ github.sha }}
-          docker tag ghcr.io/johnydeev/ia-drive-doc-processor:${{ github.sha }} ghcr.io/johnydeev/ia-drive-doc-processor:latest
-          docker compose -p ia-drive-doc-processor run --rm web npx prisma migrate deploy
-          docker compose -p ia-drive-doc-processor up -d --force-recreate
-          docker image prune -f
+          $ErrorActionPreference = 'Stop'
+          function Invoke-Step {
+            param([string]$Name, [scriptblock]$Body)
+            Write-Host "==> $Name"
+            & $Body
+            if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE" }
+          }
+
+          Invoke-Step "docker login" {
+            $env:GHCR_TOKEN | docker login ghcr.io -u johnydeev --password-stdin
+          }
+          Invoke-Step "docker pull" {
+            docker pull "ghcr.io/johnydeev/ia-drive-doc-processor:${env:IMAGE_TAG}"
+          }
+          Invoke-Step "docker tag :latest" {
+            docker tag "ghcr.io/johnydeev/ia-drive-doc-processor:${env:IMAGE_TAG}" "ghcr.io/johnydeev/ia-drive-doc-processor:latest"
+          }
+          Invoke-Step "prisma migrate deploy" {
+            docker compose -p ia-drive-doc-processor run --rm web npx prisma migrate deploy
+          }
+          Invoke-Step "docker compose up" {
+            docker compose -p ia-drive-doc-processor up -d --force-recreate
+          }
+          Invoke-Step "docker image prune" {
+            docker image prune -f
+          }
 
       - name: Wait for healthy (Linux)
         if: runner.os == 'Linux'

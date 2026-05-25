@@ -4,6 +4,126 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-21 — Fix: scripts del deploy reescritos en PowerShell
+
+### Problema
+
+El commit anterior (Hardening del workflow, ver entrada abajo) aplicó los
+3 fixes críticos usando `shell: bash`. En la primera ejecución real (CI
+run #52), el step "Write env file from GitHub Secret" falló inmediatamente
+con:
+
+```
+<3>WSL (10 - Relay) ERROR: CreateProcessCommon:818:
+execvpe(/bin/bash) failed: No such file or directory
+Error: Process completed with exit code 1.
+```
+
+El runner self-hosted está en Windows y **no tiene `/bin/bash` instalado**
+(ni Git for Windows con su `bash.exe` en PATH, ni WSL configurado para
+ejecución). Asumir bash disponible fue un error — el resto del workflow
+ya tenía pistas: el step `Wait for healthy (Windows)` usa
+`shell: powershell` justamente por esta razón.
+
+### Decisión
+
+Reescribir ambos steps en `shell: powershell` (Windows PowerShell 5.1,
+no PS Core 7). Razones:
+
+- **Windows PowerShell 5.1** está siempre disponible en cualquier Windows
+  reciente sin instalación adicional.
+- **PowerShell Core 7 (`pwsh`)** sería preferible (mejor manejo de
+  exit codes con `$PSNativeCommandUseErrorActionPreference`), pero
+  asumir su presencia es lo mismo que asumir bash. Mantengo
+  compatibilidad con lo que ya hay.
+
+**Traducción funcional de `set -euo pipefail`:**
+
+Bash con `set -e` aborta si cualquier comando devuelve exit ≠ 0.
+PowerShell con `$ErrorActionPreference = 'Stop'` aborta solo en
+cmdlets (`Get-Content`, `Write-Host`, etc.) — los **native commands**
+(`docker`, `npx`, `git`) NO disparan terminating errors; solo setean
+`$LASTEXITCODE`. Esto es el equivalente de bash sin `-e`: el script
+sigue corriendo aunque el comando falle.
+
+Solución: helper local `Invoke-Step` que envuelve cada native command:
+
+```powershell
+function Invoke-Step {
+  param([string]$Name, [scriptblock]$Body)
+  Write-Host "==> $Name"
+  & $Body
+  if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE" }
+}
+```
+
+Cada paso del deploy se ejecuta así:
+
+```powershell
+Invoke-Step "prisma migrate deploy" {
+  docker compose -p ia-drive-doc-processor run --rm web npx prisma migrate deploy
+}
+```
+
+Si `migrate deploy` falla con exit 1, el `throw` interrumpe el script y
+el job de GHA reporta ❌. Beneficio adicional: en los logs aparece
+`==> prisma migrate deploy` antes de la salida del comando, lo que
+facilita identificar dónde murió el script si falla.
+
+**Crítica #2 — `--password-stdin`** en PowerShell:
+
+```powershell
+$env:GHCR_TOKEN | docker login ghcr.io -u johnydeev --password-stdin
+```
+
+PowerShell pipea naturalmente strings a stdin de native commands.
+Idéntico al patrón `echo "$X" | docker login` de bash.
+
+**Crítica #3 — `.env` desde Secret** en PowerShell:
+
+```powershell
+[System.IO.File]::WriteAllText("$PWD\.env", $env:PROD_ENV)
+```
+
+Razón de usar `WriteAllText` en vez de `Out-File` / `Set-Content`:
+Windows PowerShell 5.1 escribe **UTF-16 LE con BOM** por defecto. El
+parser de `env_file` de docker compose espera UTF-8 sin BOM — un BOM
+en la primera línea hace que la primera variable se lea como
+`﻿DATABASE_URL` (no la encuentra) y el container arranca sin DB.
+`WriteAllText` con un solo parámetro string usa UTF-8 sin BOM por
+defecto. Validado en docs de .NET Framework.
+
+`chmod 600 .env` se eliminó — NTFS no respeta permisos POSIX, el
+comando no haría nada relevante en este runner.
+
+### Alternativas descartadas
+
+- **Instalar Git for Windows en el runner para tener bash.** Mantiene
+  los scripts originales bash pero agrega dependencia al setup del
+  runner. Si la máquina se reinstala o se agrega un segundo runner,
+  hay que recordar instalar Git for Windows. PowerShell viene preinstalado
+  en Windows — cero setup adicional.
+- **Migrar el runner a Linux (WSL2 o Docker Linux).** Habilita bash
+  nativo pero requiere reconfigurar todo el ambiente del runner. Fuera
+  de alcance de este fix.
+- **Usar `shell: 'C:\Program Files\Git\bin\bash.exe -e {0}'`** apuntando
+  al bash de Git for Windows. Sigue dependiendo de Git for Windows
+  instalado y el path puede variar (32 vs 64 bits, ubicación custom).
+- **Usar `pwsh` (PS Core 7)** en vez de `powershell` (5.1). Mejor manejo
+  de native commands con `$PSNativeCommandUseErrorActionPreference`,
+  pero asume que PS7 está instalado. PS 5.1 viene built-in en Windows
+  10/11/Server 2016+.
+
+### Impacto
+
+- `.github/workflows/ci.yml`: dos steps del job `deploy` reescritos. Mismo
+  comportamiento funcional, sintaxis PowerShell.
+- **Lección operativa:** revisar qué shells están disponibles en el runner
+  antes de usar `shell: bash` en workflows. Para self-hosted runners
+  Windows, asumir solo `powershell`/`cmd` por defecto.
+
+---
+
 ## 2026-05-21 — Hardening del workflow de deploy (3 fixes críticos)
 
 ### Problema
