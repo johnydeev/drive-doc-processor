@@ -1,9 +1,66 @@
-﻿node_modules
+# ─── Dependencias y outputs de build (se regeneran en el Dockerfile) ────
+node_modules
 .next
+dist
+*.tsbuildinfo
+
+# ─── Variables de entorno ──────────────────────────────────────────────
+# Vienen vía env_file en docker-compose o vía secrets en CI. NUNCA debe
+# entrar al contexto del build (riesgo de quedar en alguna capa intermedia).
+.env
+.env.*
+
+# ─── Control de versiones ───────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ─── Logs locales y temporales ──────────────────────────────────────────
+logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.git
-.gitignore
-.env*
+pnpm-debug.log*
+.pnpm-store
+
+# ─── Configuración de IDE / editor / herramientas locales ───────────────
+.vscode
+.idea
+.claude
+.cursor
+*.swp
+*.swo
+
+# ─── Sistema operativo ──────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+
+# ─── Documentación interna (no se necesita en runtime) ──────────────────
+# No reduce el tamaño de la imagen final (el runner stage solo copia
+# .next/standalone, public, dist y prisma desde el builder), pero acelera
+# el envío del contexto al daemon de Docker y evita exponer información
+# interna en stages intermedias.
+docs
+CHANGELOG.md
+README.md
+CLAUDE.md
+*.pdf
+
+# ─── CI/CD y configuración de plataformas (no van dentro del container) ─
+.github
+
+# ─── Tests, coverage y caches ───────────────────────────────────────────
 coverage
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__
+.eslintcache
+.next-build-cache
+
+# ─── Backups y archivos temporales propios ──────────────────────────────
+*.bak
+*.orig
+*.tmp

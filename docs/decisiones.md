@@ -4,6 +4,103 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-25 — `.dockerignore` ampliado para reducir contexto y prevenir leaks
+
+### Problema
+
+Review de seguridad/eficiencia del setup Docker detectó que el
+`.dockerignore` tenía solo 8 patrones:
+
+```
+node_modules
+.next
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.git
+.gitignore
+.env*
+```
+
+Cubría lo más crítico (node_modules, .next, .env, .git) pero dejaba
+entrar al contexto del build varios paths que no aportan al runtime y
+algunos que son sensibles:
+
+| Path | Tamaño | Razón para excluir |
+|---|---|---|
+| `dist/` | 399 KB | Se regenera en el builder con `npm run build:jobs` |
+| `logs/` | 680 KB | Logs locales de desarrollo, datos del cliente |
+| `docs/` | 180 KB | Documentación interna, decisiones técnicas |
+| `*.tsbuildinfo` | ~700 KB | Caches incrementales de TS, se regeneran |
+| `.claude/` | 4 KB | Config local de Claude Code |
+| `.vscode/` | 1 KB | Config local del IDE |
+| `CHANGELOG.md`, `README.md`, `CLAUDE.md` | ~100 KB | Docs internas |
+| `*.pdf` | 42 KB | `PDF_DOC_PROCESSOR_Presentacion.pdf` (assets de venta) |
+| `.github/` | — | Workflows de CI (no van adentro del container) |
+
+**El runner stage del Dockerfile** solo hace `COPY --from=builder` de
+paths específicos (`.next/standalone`, `public`, `dist`, `prisma`,
+node_modules), así que los archivos extra NO terminan en la imagen
+final de runtime. Pero igualmente:
+
+1. **Aumentan el contexto** que Docker envía al daemon al inicio del
+   build (~2.1 MB extra medido con `du`), ralentizando builds.
+2. **Quedan en stages intermedias** (`builder`). Si alguien hace `docker
+   run -it imagen:builder sh` para debug, ve toda la docs interna.
+3. **Riesgo de leak por cambio futuro** — si mañana alguien agrega
+   `COPY --from=builder /app/CHANGELOG.md` por error, queda en la
+   imagen final sin que nadie se entere.
+
+### Decisión
+
+Reescribir `.dockerignore` con **41 patrones organizados por
+categoría** (build outputs, env, VCS, logs, IDE, OS, docs, CI, tests,
+backups). Defensa en profundidad: aunque el Dockerfile actual no
+copie estos paths al runner, el `.dockerignore` los mantiene fuera
+del contexto desde el inicio.
+
+`scripts/` queda **incluido** porque puede ser útil ejecutar comandos
+admin con `docker exec` (ej. `create-admin.ts`, `fix-client-folders.ts`,
+`rotate-encrypted-secrets.ts`). Trade-off aceptado: ~10 KB extra a
+cambio de poder hacer mantenimiento sin reconstruir imagen.
+
+### Verificación
+
+Antes de aplicar, verifiqué que el `COPY . .` del builder (línea 27 del
+Dockerfile) sigue recibiendo todos los paths necesarios:
+
+- ✅ `package.json`, `package-lock.json` — para `npm ci`
+- ✅ `tsconfig.json`, `tsconfig.jobs.json` — para tsc
+- ✅ `next.config.ts`, `middleware.ts`, `next-env.d.ts` — para Next
+- ✅ `src/`, `public/` — código y assets
+- ✅ `prisma/` — para `npx prisma generate`
+- ✅ `scripts/` — para admin commands
+
+Ningún path requerido por el build quedó accidentalmente excluido.
+
+### Alternativas descartadas
+
+- **Refactor del Dockerfile para usar `COPY` selectivos** (`COPY src/
+  ./src`, `COPY public/ ./public`, etc.) en vez de `COPY . .`. Sería
+  más explícito pero requiere mantener la lista sincronizada cada vez
+  que se agrega un archivo top-level (`middleware.ts`, `next.config.ts`,
+  etc.). El `.dockerignore` con whitelist negativa es más mantenible.
+- **Volverse paranoico con `*` y whitelist explícita** (todo excluido
+  excepto lo listado con `!path`). Excesivo para este nivel de
+  proyecto, alto costo de mantenimiento.
+
+### Impacto
+
+- `.dockerignore`: de 8 a 41 patrones efectivos, organizados por
+  categoría con comentarios.
+- Build context reducido en ~2.1 MB adicionales medidos con `du` (sin
+  contar `node_modules` 1.2 GB + `.next/` 322 MB que ya estaban excluidos).
+- Sin cambios en la imagen final (los stages del runner no copiaban
+  esos paths igual). Beneficio principal: defensa en profundidad y
+  builds marginalmente más rápidos.
+
+---
+
 ## 2026-05-21 — Fix: docker login con action oficial (CRLF de PowerShell rompe --password-stdin)
 
 ### Problema

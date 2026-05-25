@@ -14,6 +14,18 @@ La cadena de extracción IA ahora soporta tres proveedores: **Gemini → OpenAI 
 
 ## Completado ✅
 
+- **`.dockerignore` ampliado** (25/05/2026)
+  - De 8 a 41 patrones organizados por categoría (build outputs, env, VCS,
+    logs, IDE, OS, docs, CI, tests, backups).
+  - Excluye `dist/`, `logs/`, `docs/`, `*.tsbuildinfo`, `.claude/`,
+    `.vscode/`, `CHANGELOG.md`, `README.md`, `CLAUDE.md`, `*.pdf`,
+    `.github/`, entre otros.
+  - `scripts/` queda incluido (útil para `docker exec` con admin commands).
+  - Verificado contra el Dockerfile: todos los paths requeridos por
+    `COPY . .` del builder siguen entrando al contexto.
+  - Impacto: ~2.1 MB menos de contexto (medido con `du`), defensa en
+    profundidad contra leak de docs internas en stages intermedias.
+
 - **Fix: docker login con action oficial (CRLF en PowerShell)** (21/05/2026)
   - El intento anterior con `$env:GHCR_TOKEN | docker login --password-stdin`
     falló en CI #53 con `denied: denied`. Causa: PowerShell 5.1 agrega CRLF

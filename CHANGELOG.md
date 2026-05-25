@@ -3,6 +3,41 @@
 ## [Unreleased]
 
 ### Security / CI
+- **`.dockerignore` ampliado (2026-05-25)**. El archivo tenía solo 8
+  patrones básicos. Ahora cubre 41 patrones organizados por categoría:
+  - **Build outputs:** `dist/`, `*.tsbuildinfo` (se regeneran en el
+    builder con `npm run build:jobs`).
+  - **Logs locales:** `logs/`, `*.log`, debug logs de npm/yarn/pnpm.
+  - **Variables de entorno:** ampliado a `.env` y `.env.*` (antes
+    `.env*`, equivalente pero más explícito).
+  - **IDEs y herramientas locales:** `.vscode`, `.idea`, `.claude`,
+    `.cursor`, `*.swp`/`*.swo`.
+  - **Sistema operativo:** `Thumbs.db`, `.DS_Store`.
+  - **Documentación interna:** `docs/`, `CHANGELOG.md`, `README.md`,
+    `CLAUDE.md`, `*.pdf` — no se necesitan en runtime. No reducen el
+    tamaño de la imagen final (el runner stage solo copia
+    `.next/standalone`, `public`, `dist`, `prisma` desde el builder),
+    pero aceleran el envío del contexto al daemon y evitan filtrar
+    docs internas en stages intermedias.
+  - **CI/CD:** `.github/` (los workflows no van adentro del container).
+  - **Tests y caches:** `coverage/`, `*.test.*`, `*.spec.*`,
+    `__tests__`, `.eslintcache`.
+  - **Backups:** `*.bak`, `*.orig`, `*.tmp`.
+
+  Verificado contra el Dockerfile: el `COPY . .` del builder sigue
+  recibiendo todos los paths necesarios para `npx prisma generate &&
+  npm run build && npm run build:jobs` (src, prisma, public,
+  package.json, tsconfig*, next.config.ts, middleware.ts,
+  next-env.d.ts). `scripts/` queda incluido porque puede usarse con
+  `docker exec` para tareas admin (create-admin, fix-folders, etc.).
+
+  Impacto medido del contexto excluido: ~2.1 MB adicionales (logs 680 KB,
+  tsbuildinfo ~672 KB, dist 399 KB, docs 180 KB, CHANGELOG/README/CLAUDE.md
+  ~110 KB, .pdf 44 KB, .claude/.vscode 5 KB). Los exclusiones preexistentes
+  ya cubrían 1.5 GB (`node_modules` 1.2 GB + `.next/` 322 MB). El beneficio
+  principal de esta iteración no es el tamaño sino la defensa en profundidad
+  contra leak de docs internas en stages intermedias.
+
 - **Fix: `docker login` con action oficial (2026-05-21)**. El intento
   anterior usaba `$env:GHCR_TOKEN | docker login --password-stdin` en
   PowerShell. Falló en CI run #53 con `denied: denied`. Causa: PowerShell
