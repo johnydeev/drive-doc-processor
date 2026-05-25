@@ -14,11 +14,21 @@ services:
     ports:
       - "3000:3000"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
+    # Límites para evitar que un memory leak o spike tire el host.
+    # Reservations son hints (ignoradas en non-Swarm) pero documentan el baseline.
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: "1.0"
+        reservations:
+          memory: 256M
+          cpus: "0.25"
     logging:
       driver: "json-file"
       options:
@@ -38,6 +48,15 @@ services:
     depends_on:
       web:
         condition: service_healthy
+    # Servicio muy liviano: solo lista Drive periódicamente y crea ProcessingJobs.
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+        reservations:
+          memory: 64M
+          cpus: "0.1"
     logging:
       driver: "json-file"
       options:
@@ -57,6 +76,16 @@ services:
     depends_on:
       web:
         condition: service_healthy
+    # El más pesado: OCR (tesseract + canvas) + extracción IA + pdf-parse.
+    # Picos altos al procesar PDFs grandes. 1.5G es holgado pero contenido.
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+          cpus: "2.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
     logging:
       driver: "json-file"
       options:
@@ -73,3 +102,9 @@ services:
     depends_on:
       web:
         condition: service_healthy
+    # Cloudflared es muy liviano; un cap previene mal comportamiento upstream.
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"

@@ -14,6 +14,26 @@ La cadena de extracción IA ahora soporta tres proveedores: **Gemini → OpenAI 
 
 ## Completado ✅
 
+- **Healthcheck real con verificación de DB + límites de recursos** (25/05/2026)
+  - **Nuevo endpoint `GET /api/health`**: ejecuta `prisma.$queryRaw SELECT 1`
+    con timeout de 5s. Devuelve 200 con `{status, db, uptime, timestamp}`
+    si la DB responde, 503 si falla. Público (sin auth). Reemplaza al
+    healthcheck anterior que apuntaba a `/login` (falso positivo si la DB
+    estaba caída pero el server Next respondía).
+  - **`docker-compose.yml` healthcheck**: actualizado para usar
+    `/api/health` en vez de `/login`. Ahora un fallo de DB dispara
+    `restart: unless-stopped`.
+  - **Límites de memoria y CPU** en los 4 servicios:
+    - `web`: 1024M / 1.0 CPU
+    - `scheduler`: 256M / 0.5 CPU
+    - `worker`: 1536M / 2.0 CPU (el más pesado)
+    - `tunnel`: 128M / 0.25 CPU
+  - Previene que un memory leak en el worker tire el host completo
+    (escenario crítico porque el host también corre el runner de GHA —
+    OOM bloquearía futuros deploys).
+  - Total reservation baseline: ~832 MB / ~0.85 CPU. Total limits:
+    ~2944 MB / ~3.75 CPU. Holgado para un host de 4 GB RAM y 4 vCPU.
+
 - **`.dockerignore` ampliado** (25/05/2026)
   - De 8 a 41 patrones organizados por categoría (build outputs, env, VCS,
     logs, IDE, OS, docs, CI, tests, backups).

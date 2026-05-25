@@ -3,6 +3,33 @@
 ## [Unreleased]
 
 ### Security / CI
+- **Healthcheck real con verificación de DB (2026-05-25)**. Nuevo endpoint
+  `GET /api/health` que ejecuta `prisma.$queryRaw\`SELECT 1\`` con timeout
+  de 5s y devuelve 503 si la DB no responde. El healthcheck de
+  `docker-compose.yml` ahora apunta a `/api/health` en vez de `/login`.
+  Antes, el healthcheck del container marcaba "healthy" aunque la conexión
+  a Supabase estuviera caída (porque `/login` es un form estático que pasa
+  igual). Ahora un fallo real de DB → Docker marca unhealthy → restart
+  automático según `restart: unless-stopped`. Response incluye `uptime`,
+  `timestamp` y `message` con el error si aplica. El endpoint es público
+  (sin auth) — el middleware solo matchea `/admin*` y `/login`.
+- **Límites de memoria y CPU en docker-compose.yml (2026-05-25)**.
+  Agregadas declaraciones `deploy.resources.limits` y `reservations` a los
+  4 servicios para prevenir que un memory leak en el worker o spike de
+  carga tire el host completo (escenario crítico porque el host también
+  corre el self-hosted runner de GHA — un OOM bloqueaba futuros deploys).
+  Valores elegidos basados en el rol de cada servicio:
+  - **web** (Next.js SSR): limit 1024M / 1 CPU, reservation 256M / 0.25 CPU.
+  - **scheduler** (escaneo periódico de Drive): limit 256M / 0.5 CPU,
+    reservation 64M / 0.1 CPU. Es el más liviano.
+  - **worker** (OCR + IA + pdf-parse): limit 1536M / 2 CPU, reservation
+    512M / 0.5 CPU. El más pesado, picos altos con PDFs grandes.
+  - **tunnel** (cloudflared): limit 128M / 0.25 CPU. Daemon liviano.
+
+  Las `reservations` se ignoran en Docker Compose standalone (solo aplican
+  en Swarm) pero documentan el baseline esperado. Los `limits` sí se
+  aplican y previenen OOM del host.
+
 - **`.dockerignore` ampliado (2026-05-25)**. El archivo tenía solo 8
   patrones básicos. Ahora cubre 41 patrones organizados por categoría:
   - **Build outputs:** `dist/`, `*.tsbuildinfo` (se regeneran en el

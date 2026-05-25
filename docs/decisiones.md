@@ -4,6 +4,127 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-25 — Healthcheck real con verificación de DB + límites de recursos
+
+### Problema 1 — Healthcheck con falso positivo
+
+`docker-compose.yml` testeaba `/login` para considerar al container web
+como healthy:
+
+```yaml
+test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login')..."]
+```
+
+`/login` es una página estática del Next.js que renderea un form. Pasa
+status 200 aunque Prisma no pueda conectar a la DB (la página no toca
+DB en su render). Escenario real:
+
+- Supabase tiene un blip de disponibilidad (5 min).
+- El pool de conexiones se cae o se agota.
+- El servidor Next sigue arriba respondiendo `/login` con 200.
+- **Docker marca el container "healthy"** → `restart: unless-stopped`
+  no se dispara.
+- Scheduler y worker siguen corriendo (dependen del web healthy), pero
+  todas sus queries fallan.
+- Tunnel sigue exponiendo el endpoint.
+- Te enterás cuando un usuario reporta que la app no funciona.
+
+### Problema 2 — Sin límites de recursos
+
+`docker-compose.yml` no declaraba `deploy.resources.limits` para ningún
+servicio. Escenario real:
+
+- Worker procesa un PDF grande (50 MB). OCR (tesseract + canvas) +
+  extracción IA acumulan buffers.
+- Si hay leak en `@napi-rs/canvas`, `pdf-parse` o tesseract, el proceso
+  crece sin tope.
+- Consume toda la RAM del host → kernel OOM killer mata procesos al azar.
+- **Riesgo crítico:** el host también corre el self-hosted runner de GHA.
+  Si el OOM killer lo mata, **no podés deployar el fix** hasta reiniciar
+  físicamente la máquina.
+
+### Decisión
+
+**Fix 1 — endpoint `/api/health` que ejecuta SELECT 1:**
+
+```typescript
+await Promise.race([
+  prisma.$queryRaw`SELECT 1`,
+  new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("DB ping timeout (5s)")), 5000)
+  ),
+]);
+```
+
+Si la query falla o el timeout dispara, devuelve 503 con detalle del
+error. Si pasa, devuelve 200 con `{ status, db, uptime, timestamp }`.
+El timeout corto (5s) garantiza que un Supabase degradado se detecte
+rápido en vez de hacer crash al worker que está esperando una respuesta
+que nunca llega.
+
+Healthcheck del compose actualizado a apuntar a `/api/health`.
+Resultado: si la DB cae, Docker marca el container unhealthy en 30s y
+dispara el `restart: unless-stopped`. Si el problema es del lado de
+Supabase, los reintentos eventualmente reconectan. Si el problema es
+local, el restart limpia el pool.
+
+**Endpoint público (sin auth):** el middleware solo matchea `/admin*` y
+`/login`, así que `/api/health` queda accesible sin token. Es lo
+correcto — el healthcheck de Docker no puede mandar JWT, y exponer
+metadata de salud no es secreto (status, uptime, error genérico).
+
+**Fix 2 — límites de memoria y CPU:**
+
+Agregadas declaraciones `deploy.resources.limits` y `reservations` a
+los 4 servicios. Valores derivados del rol y carga esperada:
+
+| Servicio | Memory limit | CPU limit | Reservation memory | Razón |
+|---|---|---|---|---|
+| **web** | 1024M | 1.0 | 256M | SSR Next.js, picos en endpoints pesados (sync, scan manual) |
+| **scheduler** | 256M | 0.5 | 64M | Liviano, solo lista Drive y crea ProcessingJobs |
+| **worker** | 1536M | 2.0 | 512M | El más pesado: OCR + IA + pdf-parse, picos altos |
+| **tunnel** | 128M | 0.25 | — | cloudflared, daemon liviano |
+
+Total reservation: ~832 MB / ~0.85 CPU baseline. Total limit: ~2944 MB /
+~3.75 CPU. Si el host tiene 4 GB RAM y 4 vCPU, queda holgado.
+
+### Alternativas descartadas
+
+**Para healthcheck:**
+- **Healthcheck pinged `/login` pero validar contenido HTML.** Frágil —
+  cambios al template del login romperían el healthcheck.
+- **Healthcheck a un endpoint dummy `/api/ping` sin DB.** Mismo problema
+  que `/login` actual: no detecta DB caída.
+- **Healthcheck que verifica DB + Google Drive + AI providers.** Excesivo
+  y lento — un blip de Gemini no debería marcar al container unhealthy.
+  Lo correcto es: web es healthy si puede servir y tiene DB. Los
+  providers externos los maneja el pipeline con su propio fallback.
+
+**Para límites de recursos:**
+- **Sin límites, monitoreo de RAM externo (Prometheus/Grafana).** Mejor
+  observability pero el daño ya está hecho cuando llega la alerta. Los
+  límites preventivos son baratos y matan el problema en origen.
+- **Límites en el host (cgroups manual).** Más invasivo, requiere
+  mantenimiento por separado del compose.
+- **mem_limit / cpus top-level legacy** (Compose v1). Funciona en
+  standalone pero deprecated en v2. `deploy.resources.limits` es el
+  formato actual y se aplica en standalone desde Compose v2.16+.
+
+### Impacto
+
+- `src/app/api/health/route.ts`: endpoint nuevo, ~70 líneas. Sin auth,
+  rápido (<1s típico), tolerante a fallos (timeout 5s).
+- `docker-compose.yml`: healthcheck del web actualizado + 4 bloques
+  `deploy.resources` (~50 líneas nuevas).
+- Sin migración de DB ni cambios al pipeline. Riesgo de regresión: bajo.
+- **Beneficio observable inmediato:** si en el próximo deploy hay un
+  blip de Supabase, los containers se reiniciarán solos en vez de
+  quedar zombies con DB caída.
+- **Beneficio observable bajo carga:** un worker con leak se kileará
+  por OOM dentro de su límite de 1.5 GB en vez de tirar el host.
+
+---
+
 ## 2026-05-25 — `.dockerignore` ampliado para reducir contexto y prevenir leaks
 
 ### Problema
