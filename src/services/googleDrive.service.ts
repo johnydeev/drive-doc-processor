@@ -226,6 +226,31 @@ export class GoogleDriveService {
     await this.moveFileToFolder(fileId, pendingFolderId, failedFolderId);
   }
 
+  /**
+   * Manda un archivo a la papelera (no borra definitivamente). Permite recuperarlo
+   * desde la UI de Drive si fue un error. Usado por endpoints de eliminación.
+   */
+  async trashFile(fileId: string): Promise<void> {
+    await this.drive.files.update({
+      fileId,
+      requestBody: { trashed: true },
+      supportsAllDrives: true,
+    });
+  }
+
+  /**
+   * Devuelve los IDs de las carpetas padres actuales del archivo. Útil para mover
+   * de "no sé dónde está" a una carpeta destino (calculás los `removeParents`).
+   */
+  async getFileParents(fileId: string): Promise<string[]> {
+    const res = await this.drive.files.get({
+      fileId,
+      fields: "parents",
+      supportsAllDrives: true,
+    });
+    return res.data.parents ?? [];
+  }
+
   async getFileDiagnostics(fileId: string): Promise<DriveFileDiagnostics> {
     const response = await this.drive.files.get({
       fileId,

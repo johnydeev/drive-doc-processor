@@ -49,6 +49,28 @@ function formatAmount(v: number | null | undefined) {
   if (v == null) return "—";
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2 }).format(v);
 }
+// Formato es-AR sin símbolo de moneda — útil para placeholders de inputs.
+function formatAmountPlain(v: number | null | undefined) {
+  if (v == null) return "";
+  return new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+}
+// Acepta lo que el usuario tipea: "97500,40", "97.500,40", "97500.40", "97,500.40".
+// Decide cuál es el separador decimal por el último que aparezca.
+function parseAmountInput(raw: string): number {
+  if (!raw) return NaN;
+  const cleaned = raw.replace(/\s/g, "").replace(/[^\d.,-]/g, "");
+  const lastComma = cleaned.lastIndexOf(",");
+  const lastDot = cleaned.lastIndexOf(".");
+  let normalized: string;
+  if (lastComma > lastDot) {
+    normalized = cleaned.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot > lastComma) {
+    normalized = cleaned.replace(/,/g, "");
+  } else {
+    normalized = cleaned.replace(",", ".");
+  }
+  return Number(normalized);
+}
 function formatDate(iso: string | null | undefined) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -131,11 +153,15 @@ export default function ConsortiumsPage() {
   const [userRole, setUserRole] = useState<string>("");
   const [consortiumsEnabled, setConsortiumsEnabled] = useState(false);
 
-  // Theme (session-only, no localStorage)
+  // Theme (session-only). El toggle vive en el panel principal (/admin); acá solo
+  // leemos el data-theme que dejó esa página al cargar (si existe) y default a "dark".
   const [theme, setTheme] = useState<ThemeMode>("dark");
-  const handleToggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
 
-  // PROBLEMA 5: Aplicar tema al document
+  useEffect(() => {
+    const current = document.documentElement.getAttribute("data-theme");
+    if (current === "light" || current === "dark") setTheme(current);
+  }, []);
+
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
@@ -165,6 +191,20 @@ export default function ConsortiumsPage() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [toolbarInfo, setToolbarInfo] = useState<string | null>(null);
   const [toolbarError, setToolbarError] = useState<string | null>(null);
+
+  // Autodismiss del toast (4s). Antes los mensajes vivían en el toolbar y se
+  // quedaban hasta la próxima acción — ahora son un toast flotante, así que
+  // los limpiamos solos para que no queden colgados.
+  useEffect(() => {
+    if (!toolbarInfo) return;
+    const t = setTimeout(() => setToolbarInfo(null), 4000);
+    return () => clearTimeout(t);
+  }, [toolbarInfo]);
+  useEffect(() => {
+    if (!toolbarError) return;
+    const t = setTimeout(() => setToolbarError(null), 5000);
+    return () => clearTimeout(t);
+  }, [toolbarError]);
 
   useEffect(() => {
     (async () => {
@@ -444,6 +484,14 @@ export default function ConsortiumsPage() {
   const [deletingLspId, setDeletingLspId] = useState<string | null>(null);
   const [confirmDeleteLspId, setConfirmDeleteLspId] = useState<string | null>(null);
 
+  // Eliminar boleta (pestaña Boletas)
+  const [confirmDeleteInvoiceId, setConfirmDeleteInvoiceId] = useState<string | null>(null);
+  const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null);
+  // Sección LSP colapsable. Default colapsada para ahorrar espacio visual —
+  // la mayoría de las veces los servicios públicos ya están cargados y no
+  // se necesita interactuar. Se abre on-demand para ver, agregar o eliminar.
+  const [lspCollapsed, setLspCollapsed] = useState(true);
+
   // Payment modal — soporta dos modos según PaymentRepository:
   //   Modo A (cuotas pactadas): primer pago define totalInstallments. El backend calcula
   //     el monto fijo como amount/totalInstallments. El installmentNumber arranca en 1 y
@@ -536,32 +584,45 @@ export default function ConsortiumsPage() {
 
   const handleSubmitPayment = async () => {
     if (!payModalInvoice) return;
-    if (!payForm.paymentDate) { setPayError("La fecha es obligatoria"); return; }
+
+    // Validación de campos requeridos. Se acumulan todos los errores y se
+    // muestran juntos para no obligar al usuario a corregir uno por uno.
+    const missing: string[] = [];
+    if (!payForm.paymentDate) missing.push("fecha de pago");
 
     let amountToSend = 0;
     let installmentsToSend: number | null = null;
+    let modeErr: string | null = null;
 
     if (effectiveMode === "cuotas") {
-      // Modo cuotas
       if (installmentsLocked !== null) {
-        // Continuar serie iniciada: backend ignora amount y deriva del totalInstallments existente
         installmentsToSend = installmentsLocked;
-        amountToSend = computedAmount; // valor informativo; el backend lo recalcula
+        amountToSend = computedAmount;
       } else {
-        // Primer pago en cuotas: el usuario eligió cantidad
         const inst = Number(payForm.totalInstallments);
         if (!Number.isInteger(inst) || inst < 2) {
-          setPayError("Las cuotas deben ser un entero mayor o igual a 2"); return;
+          modeErr = "Las cuotas deben ser un entero mayor o igual a 2";
+        } else {
+          installmentsToSend = inst;
+          amountToSend = computedAmount;
         }
-        installmentsToSend = inst;
-        amountToSend = computedAmount;
       }
     } else {
-      // Modo libre
       amountToSend = Number(payForm.amount);
       if (!Number.isFinite(amountToSend) || amountToSend <= 0) {
-        setPayError("El monto debe ser un número positivo"); return;
+        modeErr = "El monto debe ser un número positivo";
       }
+    }
+
+    if (!payForm.paymentMethod) missing.push("medio de pago");
+    if (!payFile) missing.push("comprobante PDF");
+
+    if (missing.length > 0 || modeErr) {
+      const parts: string[] = [];
+      if (missing.length > 0) parts.push(`Faltan campos: ${missing.join(", ")}.`);
+      if (modeErr) parts.push(modeErr);
+      setPayError(parts.join(" "));
+      return;
     }
 
     setSavingPayment(true);
@@ -742,6 +803,25 @@ export default function ConsortiumsPage() {
     } finally { setDeletingLspId(null); setConfirmDeleteLspId(null); }
   };
 
+  // Elimina la boleta + recibo asociado + mueve el PDF en Drive scanned→pending +
+  // borra fila de Sheets. Bloqueado si tiene pagos (el backend responde 409).
+  const handleDeleteInvoice = async (invoiceId: string) => {
+    if (!selectedId) return;
+    setDeletingInvoiceId(invoiceId);
+    try {
+      const res = await guardedFetch(`/api/client/consortiums/${selectedId}/invoices/${invoiceId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setInvoices((prev) => prev.filter((i) => i.id !== invoiceId));
+      setToolbarInfo("Boleta eliminada.");
+    } catch (err) {
+      setToolbarError(err instanceof Error ? err.message : "Error al eliminar boleta");
+    } finally {
+      setDeletingInvoiceId(null);
+      setConfirmDeleteInvoiceId(null);
+    }
+  };
+
   const handleSelectConsortium = useCallback(async (c: Consortium) => {
     setSelectedId(c.id); setSelectedConsortium(c);
     setActiveTab("boletas");
@@ -750,6 +830,7 @@ export default function ConsortiumsPage() {
     setMatchNamesValue(c.matchNames ?? "");
     setLspServices([]); setLspError(null); setLspForm({ provider: "", clientNumber: "", description: "" });
     setConfirmDeleteLspId(null);
+    setConfirmDeleteInvoiceId(null);
     void fetchCoeficientes(c.id);
     void fetchRubros(c.id);
     void fetchLspServices(c.id);
@@ -958,11 +1039,13 @@ export default function ConsortiumsPage() {
   const filteredInvoices = invoices.filter((inv) => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return inv.boletaNumber?.toLowerCase().includes(q) || inv.provider?.toLowerCase().includes(q) || inv.detail?.toLowerCase().includes(q) || inv.providerTaxId?.includes(q);
+    return inv.boletaNumber?.toLowerCase().includes(q) || inv.provider?.toLowerCase().includes(q) || inv.providerTaxId?.includes(q);
   });
 
-  const totalAmount = filteredInvoices.reduce((s, i) => s + (i.amount != null ? Number(i.amount) : 0), 0);
-  const duplicates = filteredInvoices.filter((i) => i.isDuplicate).length;
+  // Los totales del header se calculan sobre el período completo, no sobre
+  // el subset filtrado — el filtro afecta la tabla visible, no las métricas.
+  const totalAmount = invoices.reduce((s, i) => s + (i.amount != null ? Number(i.amount) : 0), 0);
+  const duplicates = invoices.filter((i) => i.isDuplicate).length;
 
   if (!accessChecked) return null;
 
@@ -1044,6 +1127,39 @@ export default function ConsortiumsPage() {
           )}
         </nav>
         <div style={{ flex: 1 }} />
+
+        {/* ── Controles del scheduler (movidos desde el toolbar superior) ── */}
+        {isClient && schedulerEnabled !== null && (
+          <button
+            type="button"
+            className={styles.navSidebarItem}
+            onClick={() => { handleToggleScheduler(); setNavMobileOpen(false); }}
+            disabled={busyAction !== null}
+            title={paused ? "Reanudar el scheduler" : "Pausar el scheduler"}
+          >
+            <span className={styles.navSidebarItemIcon}>{paused ? "▶️" : "⏸️"}</span>
+            {!navCollapsed && (
+              <span className={styles.navSidebarItemLabel}>
+                {paused ? "Encender scheduler" : "Pausar scheduler"}
+              </span>
+            )}
+          </button>
+        )}
+        {isClient && (
+          <button
+            type="button"
+            className={styles.navSidebarItem}
+            onClick={() => { handleRunNow(); setNavMobileOpen(false); }}
+            disabled={busyAction !== null}
+            title="Forzar una corrida inmediata del scheduler"
+          >
+            <span className={styles.navSidebarItemIcon}>⚡</span>
+            {!navCollapsed && <span className={styles.navSidebarItemLabel}>Ejecutar ahora</span>}
+          </button>
+        )}
+
+        <div className={styles.navSidebarDivider} />
+
         <button type="button" className={styles.navSidebarItem} onClick={() => { handleLogout(); setNavMobileOpen(false); }}>
           <span className={styles.navSidebarItemIcon}>🚪</span>
           {!navCollapsed && <span className={styles.navSidebarItemLabel}>Cerrar sesión</span>}
@@ -1084,34 +1200,30 @@ export default function ConsortiumsPage() {
         </nav>
       </aside>
 
+      {/* ── Botón hamburger flotante (solo mobile/tablet ≤1024px) ── */}
+      <button
+        type="button"
+        className={styles.fabHamburger}
+        onClick={() => setNavMobileOpen(true)}
+        aria-label="Abrir menú lateral"
+      >
+        ☰
+      </button>
+
+      {/* ── Toasts flotantes (arriba a la derecha) ── */}
+      {(toolbarInfo || toolbarError) && (
+        <div className={styles.toastContainer} role="status" aria-live="polite">
+          {toolbarInfo && (
+            <div className={`${styles.toastItem} ${styles.toastInfoItem}`}>{toolbarInfo}</div>
+          )}
+          {toolbarError && (
+            <div className={`${styles.toastItem} ${styles.toastErrorItem}`}>{toolbarError}</div>
+          )}
+        </div>
+      )}
+
       {/* ── Columna 3: Contenido principal ── */}
       <div className={styles.contentCol}>
-        <div className={styles.toolbar}>
-          <div className={styles.toolbarLeft}>
-            <button type="button" className={styles.hamburger} onClick={() => setNavMobileOpen(true)}>☰</button>
-            {isClient && schedulerEnabled !== null && (
-              <button type="button" className={paused ? styles.toolbarBtnSuccess : styles.toolbarBtnWarn}
-                onClick={handleToggleScheduler} disabled={busyAction !== null}>
-                {paused ? "Encender scheduler" : "Pausar scheduler"}
-              </button>
-            )}
-            {isClient && (
-              <button type="button" className={styles.toolbarBtn} onClick={handleRunNow} disabled={busyAction !== null}>
-                Ejecutar ahora
-              </button>
-            )}
-            {toolbarInfo && <span style={{ fontSize: "11px", color: "var(--success)" }}>{toolbarInfo}</span>}
-            {toolbarError && <span style={{ fontSize: "11px", color: "var(--error)" }}>{toolbarError}</span>}
-          </div>
-          <div className={styles.toolbarRight}>
-            <button type="button"
-              onClick={handleToggleTheme}
-              aria-label={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-              className={`${styles.themeToggle} ${theme === "light" ? styles.themeToggleLight : ""}`}>
-              <span className={styles.themeToggleKnob}>{theme === "dark" ? "☀️" : "🌙"}</span>
-            </button>
-          </div>
-        </div>
 
         <header className={styles.header}>
           <div>
@@ -1143,7 +1255,18 @@ export default function ConsortiumsPage() {
             <>
               <div className={styles.detailHeader}>
                 <div>
-                  <h2 className={styles.detailTitle}>{selectedConsortium.rawName}</h2>
+                  <div className={styles.detailTitleRow}>
+                    <h2 className={styles.detailTitle}>{selectedConsortium.rawName}</h2>
+                    {/* Navegador de período inline al lado del nombre */}
+                    <div className={styles.periodNav}>
+                      <button type="button" className={styles.periodNavBtn} onClick={goPrevPeriod} disabled={!canGoPrev} aria-label="Período anterior">‹</button>
+                      <span className={styles.periodNavLabel}>
+                        {selectedPeriod ? formatPeriod(selectedPeriod) : "Sin período"}
+                        {selectedPeriod?.status === "CLOSED" && <span className={styles.closedTag}>Cerrado</span>}
+                      </span>
+                      <button type="button" className={styles.periodNavBtn} onClick={goNextPeriod} disabled={!canGoNext} aria-label="Período siguiente">›</button>
+                    </div>
+                  </div>
                   {selectedConsortium.cuit && <p className={styles.detailMeta}>CUIT: {selectedConsortium.cuit}</p>}
                 </div>
                 <div className={styles.detailActions}>
@@ -1164,9 +1287,25 @@ export default function ConsortiumsPage() {
                 </div>
               </div>
 
-              {/* ── LspServices section ── */}
+              {/* ── LspServices section (colapsable) ── */}
               <div className={styles.lspSection}>
-                <h3 className={styles.lspTitle}>Servicios públicos (LSP)</h3>
+                <button
+                  type="button"
+                  className={styles.lspToggle}
+                  onClick={() => setLspCollapsed((c) => !c)}
+                  aria-expanded={!lspCollapsed}
+                  aria-controls="lsp-content"
+                >
+                  <span className={styles.lspToggleChevron} aria-hidden="true">
+                    {lspCollapsed ? "▸" : "▾"}
+                  </span>
+                  <span className={styles.lspTitle}>Servicios públicos (LSP)</span>
+                  {lspServices.length > 0 && (
+                    <span className={styles.lspToggleCount}>{lspServices.length}</span>
+                  )}
+                </button>
+                {!lspCollapsed && (
+                <div id="lsp-content" className={styles.lspContent}>
                 {lspServices.length > 0 && (
                   <div className={styles.lspTableWrap}>
                     <table className={styles.lspTable}>
@@ -1215,15 +1354,8 @@ export default function ConsortiumsPage() {
                   </button>
                 </div>
                 {lspError && <p className={styles.errorMsg}>{lspError}</p>}
-              </div>
-
-              <div className={styles.periodNav}>
-                <button type="button" className={styles.periodNavBtn} onClick={goPrevPeriod} disabled={!canGoPrev}>‹</button>
-                <span className={styles.periodNavLabel}>
-                  {selectedPeriod ? formatPeriod(selectedPeriod) : "Sin período"}
-                  {selectedPeriod?.status === "CLOSED" && <span className={styles.closedTag}>Cerrado</span>}
-                </span>
-                <button type="button" className={styles.periodNavBtn} onClick={goNextPeriod} disabled={!canGoNext}>›</button>
+                </div>
+                )}
               </div>
 
               {closeSuccess && <p className={styles.infoMsg}>{closeSuccess}</p>}
@@ -1250,14 +1382,14 @@ export default function ConsortiumsPage() {
               {activeTab === "boletas" && (
               <>
               <div className={styles.statsStrip}>
-                <div className={styles.statCard}><span className={styles.statLabel}>Boletas</span><span className={styles.statValue}>{filteredInvoices.length}</span></div>
+                <div className={styles.statCard}><span className={styles.statLabel}>Boletas</span><span className={styles.statValue}>{invoices.length}</span></div>
                 <div className={styles.statCard}><span className={styles.statLabel}>Total período</span><span className={styles.statValue}>{formatAmount(totalAmount)}</span></div>
                 <div className={styles.statCard}><span className={styles.statLabel}>Duplicados</span><span className={`${styles.statValue} ${duplicates > 0 ? styles.statWarn : ""}`}>{duplicates}</span></div>
                 <div className={styles.statCard}><span className={styles.statLabel}>Rubros</span><span className={styles.statValue}>{rubros.length}</span></div>
               </div>
 
               <div className={styles.searchRow}>
-                <input type="text" className={styles.searchInput} placeholder="Buscar por proveedor, N° boleta o detalle..." value={search} onChange={(e) => setSearch(e.target.value)} />
+                <input type="text" className={styles.searchInput} placeholder="Buscar por proveedor, N° boleta o CUIT..." value={search} onChange={(e) => setSearch(e.target.value)} />
                 {search && <button type="button" className={styles.clearSearch} onClick={() => setSearch("")}>✕</button>}
               </div>
 
@@ -1274,7 +1406,7 @@ export default function ConsortiumsPage() {
                           <th>N° Boleta</th><th>Proveedor</th><th>CUIT</th><th>Comprobante</th>
                           <th>Detalle</th><th>Emisión</th><th>Vencimiento</th><th>Monto</th>
                           <th>Tipo</th><th>Rubro</th><th>Coef.</th><th>Estado</th>
-                          <th>Archivo</th><th>Pago</th>
+                          <th>Archivo</th><th>Pago</th><th>Acciones</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1309,38 +1441,38 @@ export default function ConsortiumsPage() {
                                 ? <a href={inv.sourceFileUrl} target="_blank" rel="noopener noreferrer" className={styles.fileLink}>Ver PDF</a>
                                 : "—"}
                             </td>
-                            {/* ── Columna pago ── */}
+                            {/* ── Columna pago (solo estado visual; las acciones viven en la pestaña Pagos) ── */}
                             <td>
                               {inv.isPaid ? (
-                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  <span className={styles.badgeOk}>Pagada</span>
-                                  <button
-                                    type="button"
-                                    className={styles.ghostBtn}
-                                    style={{ padding: "4px 10px", fontSize: 12 }}
-                                    onClick={() => handleOpenViewPayments(inv)}
-                                    title="Ver historial de pagos"
-                                  >
-                                    Ver pagos
-                                  </button>
-                                </div>
+                                <span className={styles.badgeOk}>Pagada</span>
+                              ) : inv.remainingBalance !== null && Number(inv.remainingBalance) < Number(inv.amount ?? 0) ? (
+                                <span className={styles.badgeWarning}>
+                                  Resta ${Number(inv.remainingBalance).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                </span>
                               ) : (
-                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  {inv.remainingBalance !== null && (
-                                    <span className={styles.badgeWarning}>
-                                      Resta ${Number(inv.remainingBalance).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                                    </span>
-                                  )}
-                                  <button
-                                    type="button"
-                                    className={styles.addInvoiceBtn}
-                                    style={{ padding: "4px 10px", fontSize: 12 }}
-                                    onClick={() => handleOpenPayModal(inv)}
-                                    title="Registrar pago"
-                                  >
-                                    Pagar
+                                <span style={{ color: "var(--text-muted, #888)" }}>—</span>
+                              )}
+                            </td>
+                            {/* ── Acciones: eliminar boleta (confirm inline) ── */}
+                            <td>
+                              {confirmDeleteInvoiceId === inv.id ? (
+                                <span className={styles.lspConfirmDelete}>
+                                  ¿Borrar?{" "}
+                                  <button type="button" className={styles.lspConfirmYes} onClick={() => handleDeleteInvoice(inv.id)} disabled={deletingInvoiceId === inv.id}>
+                                    {deletingInvoiceId === inv.id ? "..." : "Sí"}
                                   </button>
-                                </div>
+                                  <button type="button" className={styles.lspConfirmNo} onClick={() => setConfirmDeleteInvoiceId(null)}>No</button>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className={styles.lspDeleteBtn}
+                                  onClick={() => setConfirmDeleteInvoiceId(inv.id)}
+                                  title="Eliminar boleta (mueve PDF a 'pending' y borra fila de Sheets)"
+                                  aria-label="Eliminar boleta"
+                                >
+                                  🗑
+                                </button>
                               )}
                             </td>
                           </tr>
@@ -1356,9 +1488,33 @@ export default function ConsortiumsPage() {
               {activeTab === "pagos" && (
                 <PagosView
                   invoices={invoices}
-                  consortiumBank={selectedConsortium?.bank ?? null}
                   onPagoGuardado={() => {
                     if (selectedId && selectedPeriod) void fetchInvoices(selectedId, selectedPeriod.id);
+                  }}
+                  onPagar={handleOpenPayModal}
+                  onVerPagos={handleOpenViewPayments}
+                  onEliminarUltimoPago={async (invoiceId) => {
+                    // Busca el último pago de la invoice y lo elimina. El endpoint
+                    // valida que sea el más reciente (restricción del repository).
+                    try {
+                      const res = await guardedFetch(`/api/client/invoices/${invoiceId}/payments`, { cache: "no-store" });
+                      const data = await res.json();
+                      if (!data.ok || !Array.isArray(data.payments) || data.payments.length === 0) {
+                        throw new Error("La boleta no tiene pagos para eliminar");
+                      }
+                      // Más reciente primero (paymentDate desc o createdAt desc; tomamos el primero)
+                      const sorted = [...data.payments].sort((a: { createdAt?: string }, b: { createdAt?: string }) =>
+                        (b.createdAt ?? "").localeCompare(a.createdAt ?? "")
+                      );
+                      const last = sorted[0];
+                      const delRes = await guardedFetch(`/api/client/invoices/${invoiceId}/payments/${last.id}`, { method: "DELETE" });
+                      const delData = await delRes.json();
+                      if (!delRes.ok || !delData.ok) throw new Error(delData.error ?? `HTTP ${delRes.status}`);
+                      setToolbarInfo("Pago eliminado.");
+                      if (selectedId && selectedPeriod) void fetchInvoices(selectedId, selectedPeriod.id);
+                    } catch (err) {
+                      setToolbarError(err instanceof Error ? err.message : "Error al eliminar pago");
+                    }
                   }}
                 />
               )}
@@ -1849,7 +2005,7 @@ export default function ConsortiumsPage() {
                   onClick={() => setChosenMode("cuotas")}
                   disabled={savingPayment}
                 >
-                  Pagar en cuotas
+                  Cuotas fijas
                 </button>
               </div>
             )}
@@ -1917,14 +2073,17 @@ export default function ConsortiumsPage() {
 
               <label>
                 <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>Medio de pago</span>
-                <input
-                  type="text"
-                  className={styles.formInput}
-                  placeholder="Transferencia / Cheque / Efectivo..."
+                <select
+                  className={styles.formSelect}
                   value={payForm.paymentMethod}
                   onChange={(e) => setPayForm((f) => ({ ...f, paymentMethod: e.target.value }))}
                   disabled={savingPayment}
-                />
+                >
+                  <option value="" disabled hidden>Elija una opción</option>
+                  <option value="Débito automático">Débito automático</option>
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Efectivo">Efectivo</option>
+                </select>
               </label>
               <label style={{ gridColumn: "1 / -1" }}>
                 <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>Observación (opcional)</span>
@@ -1937,7 +2096,7 @@ export default function ConsortiumsPage() {
                 />
               </label>
               <label style={{ gridColumn: "1 / -1" }}>
-                <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>Comprobante PDF (opcional)</span>
+                <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4, opacity: 0.8 }}>Comprobante PDF</span>
                 <input
                   ref={payFileInputRef}
                   type="file"
@@ -2037,46 +2196,127 @@ interface PendingPaymentInput {
   paymentDate: string;
   amount: string;
   paymentMethod: string;
+  file: File | null;
 }
 
 interface PagosViewProps {
   invoices: Invoice[];
-  consortiumBank: string | null;
   onPagoGuardado: () => void;
+  onPagar: (inv: Invoice) => void;
+  onVerPagos: (inv: Invoice) => void;
+  onEliminarUltimoPago: (invoiceId: string) => Promise<void>;
 }
 
-function PagosView({ invoices, consortiumBank, onPagoGuardado }: PagosViewProps) {
+function PagosView({ invoices, onPagoGuardado, onPagar, onVerPagos, onEliminarUltimoPago }: PagosViewProps) {
+  // Confirm inline para eliminar último pago de una boleta paga (estado local).
+  const [confirmDeletePaymentInvoiceId, setConfirmDeletePaymentInvoiceId] = useState<string | null>(null);
+  const [deletingPaymentInvoiceId, setDeletingPaymentInvoiceId] = useState<string | null>(null);
   const [pendingPayments, setPendingPayments] = useState<Record<string, PendingPaymentInput>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Buscador local de PagosView. State separado del de Boletas — cada pestaña
+  // tiene su contexto de búsqueda independiente.
+  const [search, setSearch] = useState("");
 
-  const visibleInvoices = invoices.filter((inv) => !inv.isDuplicate);
+  const allVisible = invoices.filter((inv) => !inv.isDuplicate);
 
-  const totalPeriodo = visibleInvoices.reduce((sum, inv) => sum + (inv.amount ?? 0), 0);
-  const totalPagado = visibleInvoices.filter((inv) => inv.isPaid).reduce((sum, inv) => sum + (inv.amount ?? 0), 0);
-  const totalImpago = visibleInvoices
+  // Filtro por proveedor, N° boleta o CUIT (mismo criterio que la pestaña Boletas).
+  const visibleInvoices = (() => {
+    if (!search.trim()) return allVisible;
+    const q = search.toLowerCase();
+    return allVisible.filter((inv) => {
+      const provider = (inv.provider ?? "").toLowerCase();
+      const boleta = (inv.boletaNumber ?? "").toLowerCase();
+      const cuit = inv.providerTaxId ?? "";
+      return provider.includes(q) || boleta.includes(q) || cuit.includes(q);
+    });
+  })();
+
+  // Prisma serializa Decimal como string → `string + 0` concatena en vez de sumar
+  // y termina dando NaN cuando formateamos. Forzar Number() en cada reduce.
+  const toNum = (v: number | string | null | undefined): number => {
+    if (v === null || v === undefined) return 0;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  // Métricas del header sobre el período completo (no sobre el filtrado) —
+  // el buscador afecta la tabla, no las métricas globales.
+  const totalBoletas = allVisible.length;
+  const boletasPagadas = allVisible.filter((inv) => inv.isPaid).length;
+
+  const totalImpago = allVisible
     .filter((inv) => !inv.isPaid)
-    .reduce((sum, inv) => sum + (inv.remainingBalance ?? inv.amount ?? 0), 0);
+    .reduce((sum, inv) => {
+      const amount = toNum(inv.amount);
+      const remaining = inv.remainingBalance === null ? amount : toNum(inv.remainingBalance);
+      return sum + remaining;
+    }, 0);
 
   const updatePending = (invoiceId: string, field: keyof PendingPaymentInput, value: string) => {
     setPendingPayments((prev) => {
-      const existing = prev[invoiceId] ?? { paymentDate: todayInputDate(), amount: "", paymentMethod: "" };
+      const existing = prev[invoiceId] ?? { paymentDate: todayInputDate(), amount: "", paymentMethod: "", file: null };
       return { ...prev, [invoiceId]: { ...existing, [field]: value } };
     });
   };
 
+  // Handler separado para el File del comprobante (no es string).
+  const updatePendingFile = (invoiceId: string, file: File | null) => {
+    setPendingPayments((prev) => {
+      const existing = prev[invoiceId] ?? { paymentDate: todayInputDate(), amount: "", paymentMethod: "", file: null };
+      return { ...prev, [invoiceId]: { ...existing, file } };
+    });
+  };
+
   const handleGuardarPagos = async () => {
-    setSaving(true);
     setError(null);
+
+    // Solo procesamos filas con "intención de pago" (alguno de los campos
+    // tocados). Las que no tienen nada se ignoran silenciosamente.
+    const dirtyEntries = Object.entries(pendingPayments).filter(([, p]) =>
+      Boolean(p.paymentDate || p.amount || p.paymentMethod || p.file)
+    );
+
+    if (dirtyEntries.length === 0) return;
+
+    // Validación: cada fila iniciada debe tener fecha + importe (salvo
+    // empleado, que se autocalcula) + medio de pago + comprobante.
+    const errors: string[] = [];
+    for (const [invoiceId, pago] of dirtyEntries) {
+      const inv = visibleInvoices.find((i) => i.id === invoiceId);
+      if (!inv) continue;
+      const provider = inv.provider ?? "Proveedor s/d";
+      const boleta = inv.boletaNumber ?? "s/N°";
+      const label = `${provider} – ${boleta}`;
+      const missing: string[] = [];
+
+      if (!pago.paymentDate) missing.push("fecha de pago");
+
+      if (inv.providerType !== "EMPLEADO") {
+        const parsed = parseAmountInput(pago.amount);
+        if (!Number.isFinite(parsed) || parsed <= 0) missing.push("importe");
+      }
+
+      if (!pago.paymentMethod) missing.push("medio de pago");
+      if (!pago.file) missing.push("comprobante PDF");
+
+      if (missing.length > 0) errors.push(`${label}: falta ${missing.join(", ")}.`);
+    }
+
+    if (errors.length > 0) {
+      setError(errors.join(" "));
+      return;
+    }
+
+    setSaving(true);
     try {
-      const entries = Object.entries(pendingPayments).filter(([, p]) => p.paymentDate);
-      for (const [invoiceId, pago] of entries) {
+      for (const [invoiceId, pago] of dirtyEntries) {
         const inv = visibleInvoices.find((i) => i.id === invoiceId);
         if (!inv) continue;
 
         const totalAmount = inv.amount ?? 0;
         const remainingAmount = inv.remainingBalance ?? totalAmount;
-        const parsedInput = pago.amount ? Number(pago.amount) : NaN;
+        const parsedInput = parseAmountInput(pago.amount);
 
         const amount = inv.providerType === "EMPLEADO"
           ? totalAmount
@@ -2086,15 +2326,31 @@ function PagosView({ invoices, consortiumBank, onPagoGuardado }: PagosViewProps)
 
         if (!amount || amount <= 0) continue;
 
-        const res = await fetch(`/api/client/invoices/${invoiceId}/payments`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            amount,
-            paymentDate: pago.paymentDate,
-            paymentMethod: pago.paymentMethod || null,
-          }),
-        });
+        // Si hay archivo, usamos FormData (el endpoint acepta multipart;
+        // el modal de Cuotas ya usa este camino). Si no, mantenemos JSON
+        // para no romper la lógica existente del flujo inline simple.
+        let res: Response;
+        if (pago.file) {
+          const fd = new FormData();
+          fd.append("amount", String(amount));
+          fd.append("paymentDate", pago.paymentDate);
+          if (pago.paymentMethod) fd.append("paymentMethod", pago.paymentMethod);
+          fd.append("receipt", pago.file);
+          res = await fetch(`/api/client/invoices/${invoiceId}/payments`, {
+            method: "POST",
+            body: fd,
+          });
+        } else {
+          res = await fetch(`/api/client/invoices/${invoiceId}/payments`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              amount,
+              paymentDate: pago.paymentDate,
+              paymentMethod: pago.paymentMethod || null,
+            }),
+          });
+        }
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       }
@@ -2111,27 +2367,48 @@ function PagosView({ invoices, consortiumBank, onPagoGuardado }: PagosViewProps)
   const totalPendiente = Object.entries(pendingPayments).reduce((sum, [invoiceId, p]) => {
     const inv = visibleInvoices.find((i) => i.id === invoiceId);
     if (!inv) return sum;
-    if (inv.providerType === "EMPLEADO") return sum + (inv.amount ?? 0);
-    const parsed = p.amount ? Number(p.amount) : NaN;
+    if (inv.providerType === "EMPLEADO") return sum + toNum(inv.amount);
+    const parsed = parseAmountInput(p.amount);
     if (Number.isFinite(parsed) && parsed > 0) return sum + parsed;
-    return sum + (inv.remainingBalance ?? inv.amount ?? 0);
+    const remaining = inv.remainingBalance === null ? toNum(inv.amount) : toNum(inv.remainingBalance);
+    return sum + remaining;
   }, 0);
 
   return (
     <>
-      <div className={styles.pagosSummary}>
-        <span>Total del período: {formatAmount(totalPeriodo)}</span>
-        <span>Pagos del mes actual: {formatAmount(totalPagado)}</span>
-        <span className={styles.saldoImpago}>
-          Gastos con saldo impago: {formatAmount(totalImpago)}
-        </span>
+      <div className={styles.statsStrip}>
+        <div className={styles.statCard}>
+          <span className={styles.statLabel}>Pagos registrados</span>
+          <span className={styles.statValue}>{boletasPagadas} de {totalBoletas}</span>
+        </div>
+        <div className={styles.statCard}>
+          <span className={styles.statLabel}>Saldo impago</span>
+          <span className={`${styles.statValue} ${totalImpago > 0 ? styles.statWarn : ""}`}>{formatAmount(totalImpago)}</span>
+        </div>
       </div>
 
+      {/* Buscador (espejo del de la pestaña Boletas) */}
+      <div className={styles.searchRow}>
+        <input
+          type="text"
+          className={styles.searchInput}
+          placeholder="Buscar por proveedor, N° boleta o CUIT..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {search && (
+          <button type="button" className={styles.clearSearch} onClick={() => setSearch("")}>✕</button>
+        )}
+      </div>
       {error && <p className={styles.errorMsg}>{error}</p>}
 
       <div className={styles.tableWrap}>
         {visibleInvoices.length === 0 ? (
-          <div className={styles.tableEmpty}>No hay boletas para este período.</div>
+          <div className={styles.tableEmpty}>
+            {search
+              ? "No hay boletas que coincidan con la búsqueda."
+              : "No hay boletas para este período."}
+          </div>
         ) : (
           <table className={styles.table}>
             <thead>
@@ -2144,6 +2421,8 @@ function PagosView({ invoices, consortiumBank, onPagoGuardado }: PagosViewProps)
                 <th>FECHA PAGO</th>
                 <th>IMPORTE PAGO</th>
                 <th>MEDIO DE PAGO</th>
+                <th>COMPROBANTE</th>
+                <th>ACCIONES</th>
               </tr>
             </thead>
             <tbody>
@@ -2180,10 +2459,10 @@ function PagosView({ invoices, consortiumBank, onPagoGuardado }: PagosViewProps)
                         <span>{formatAmount(totalAmount)}</span>
                       ) : (
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           className={styles.formInput}
-                          step="0.01"
-                          placeholder={String(saldo)}
+                          placeholder={formatAmountPlain(saldo)}
                           value={pending?.amount ?? ""}
                           onChange={(e) => updatePending(inv.id, "amount", e.target.value)}
                         />
@@ -2199,21 +2478,103 @@ function PagosView({ invoices, consortiumBank, onPagoGuardado }: PagosViewProps)
                           value={pending?.paymentMethod ?? ""}
                           onChange={(e) => updatePending(inv.id, "paymentMethod", e.target.value)}
                         >
-                          <option value="">—</option>
-                          {consortiumBank && (
-                            <>
-                              <option value={`Transferencia [${consortiumBank}]`}>
-                                Transferencia [{consortiumBank}]
-                              </option>
-                              <option value={`Cheque propio [${consortiumBank}]`}>
-                                Cheque propio [{consortiumBank}]
-                              </option>
-                            </>
-                          )}
-                          <option value="Descuento">Descuento</option>
+                          <option value="" disabled hidden>Elija una opción</option>
+                          <option value="Débito automático">Débito automático</option>
+                          <option value="Transferencia">Transferencia</option>
                           <option value="Efectivo">Efectivo</option>
                         </select>
                       )}
+                    </td>
+
+                    {/* ── Comprobante (PDF opcional inline) ── */}
+                    <td>
+                      {inv.isPaid ? (
+                        <span>—</span>
+                      ) : (
+                        <label
+                          className={styles.ghostBtn}
+                          style={{
+                            padding: "4px 10px",
+                            fontSize: 12,
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            maxWidth: 140,
+                          }}
+                          title={pending?.file?.name ?? "Adjuntar comprobante PDF"}
+                        >
+                          <span>📎</span>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {pending?.file ? pending.file.name : "Adjuntar"}
+                          </span>
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            style={{ display: "none" }}
+                            onChange={(e) => updatePendingFile(inv.id, e.target.files?.[0] ?? null)}
+                          />
+                        </label>
+                      )}
+                    </td>
+
+                    {/* ── Acciones: Pagar/Ver pagos + Eliminar último pago ── */}
+                    <td>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        {inv.isPaid ? (
+                          <button
+                            type="button"
+                            className={styles.ghostBtn}
+                            style={{ padding: "4px 10px", fontSize: 12 }}
+                            onClick={() => onVerPagos(inv)}
+                            title="Ver historial de pagos"
+                          >
+                            Ver pagos
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className={styles.addInvoiceBtn}
+                            style={{ padding: "4px 10px", fontSize: 12 }}
+                            onClick={() => onPagar(inv)}
+                            title="Registrar pago en cuotas (fijas o variables). Para un solo pago, usá los inputs inline de esta fila."
+                          >
+                            Cuotas
+                          </button>
+                        )}
+
+                        {/* Eliminar último pago: solo si la boleta tiene al menos un pago */}
+                        {(inv.isPaid || (inv.remainingBalance !== null && Number(inv.remainingBalance) < Number(inv.amount ?? 0))) && (
+                          confirmDeletePaymentInvoiceId === inv.id ? (
+                            <span className={styles.lspConfirmDelete}>
+                              ¿Borrar último pago?{" "}
+                              <button
+                                type="button"
+                                className={styles.lspConfirmYes}
+                                disabled={deletingPaymentInvoiceId === inv.id}
+                                onClick={async () => {
+                                  setDeletingPaymentInvoiceId(inv.id);
+                                  try { await onEliminarUltimoPago(inv.id); }
+                                  finally { setDeletingPaymentInvoiceId(null); setConfirmDeletePaymentInvoiceId(null); }
+                                }}
+                              >
+                                {deletingPaymentInvoiceId === inv.id ? "..." : "Sí"}
+                              </button>
+                              <button type="button" className={styles.lspConfirmNo} onClick={() => setConfirmDeletePaymentInvoiceId(null)}>No</button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className={styles.lspDeleteBtn}
+                              onClick={() => setConfirmDeletePaymentInvoiceId(inv.id)}
+                              title="Eliminar el último pago registrado (revierte estado y borra comprobante de Drive si tenía)"
+                              aria-label="Eliminar último pago"
+                            >
+                              🗑
+                            </button>
+                          )
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

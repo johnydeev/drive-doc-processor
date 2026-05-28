@@ -178,6 +178,13 @@
   gap: 16px;
   flex-wrap: wrap;
 }
+/* Fila título + navegador de período (inline al lado del nombre) */
+.detailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
 .detailTitle { font-size: 22px; font-weight: 700; color: var(--text-heading); }
 .detailMeta { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
 .detailActions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
@@ -214,6 +221,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  text-transform: uppercase;
 }
 
 .closedTag {
@@ -261,36 +269,60 @@
 }
 .clearSearch:hover { color: #aab8d8; }
 
-/* ── Stats ── */
+/* ── Stats inline: cada métrica con su propio recuadro, todos en una fila ── */
 .statsStrip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0,1fr));
-  gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 .statCard {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px 16px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 14px;
   background: var(--bg-card);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
-.statLabel { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-muted); }
-.statValue { font-size: 22px; font-weight: 700; color: var(--text-heading); }
+.statLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.statValue {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-heading);
+  line-height: 1;
+}
 .statWarn { color: var(--warning); }
 
 /* ── Table ── */
 .tableWrap {
   border: 1px solid var(--border);
   border-radius: 14px;
-  overflow: hidden;
   background: var(--bg-surface);
+  /* Scroll: vertical con tope de viewport (vez muchas filas sin desbordar
+     la página) + horizontal cuando la tabla es muy ancha. */
+  max-height: 65vh;
+  overflow: auto;
+}
+@media (max-width: 768px) {
+  .tableWrap { max-height: 60vh; }
 }
 .tableEmpty { padding: 32px; text-align: center; color: var(--text-muted); font-size: 14px; }
 
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.table thead { background: var(--bg-card); }
+/* Sticky header: queda fijo arriba al scrollear la tabla larga. */
+.table thead {
+  background: var(--bg-card);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
 .table th {
   padding: 12px 14px;
   text-align: left;
@@ -300,6 +332,7 @@
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  background: var(--bg-card);   /* respaldo por si el sticky pierde bg en algún browser */
 }
 .table td {
   padding: 11px 14px;
@@ -936,14 +969,51 @@
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 10px 16px;
   margin-bottom: 12px;
+}
+/* Header clickable que colapsa/expande la sección. Reemplaza el <h3> simple. */
+.lspToggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+.lspToggle:hover .lspTitle { color: #e3edff; }
+.lspToggleChevron {
+  font-size: 11px;
+  color: #7aaeff;
+  width: 14px;
+  display: inline-flex;
+  justify-content: center;
+  transition: transform 0.15s ease;
 }
 .lspTitle {
   font-size: 14px;
   font-weight: 600;
   color: #c0cde5;
-  margin-bottom: 10px;
+  transition: color 0.15s ease;
+}
+.lspToggleCount {
+  font-size: 11px;
+  font-weight: 600;
+  color: #7aaeff;
+  background: rgba(91,140,247,0.15);
+  border: 1px solid rgba(91,140,247,0.3);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 4px;
+}
+/* Contenido que se muestra cuando la sección está expandida */
+.lspContent {
+  margin-top: 12px;
 }
 .lspEmpty {
   font-size: 12px;
@@ -1051,7 +1121,8 @@
 }
 
 @media (max-width: 768px) {
-  .statsStrip { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  /* statsStrip ya es flex con wrap; gap más chico en mobile */
+  .statsStrip { gap: 6px 16px; padding: 8px 12px; }
   .main { padding: 16px; }
   .invoiceFormGrid, .providerFormGrid { grid-template-columns: 1fr; }
   .toolbar { padding: 8px 12px; }
@@ -1060,7 +1131,6 @@
 
 @media (max-width: 560px) {
   .page { flex-direction: column; }
-  .statsStrip { grid-template-columns: 1fr 1fr; }
   .header { flex-direction: column; gap: 8px; }
   .headerActions { flex-wrap: wrap; }
 }
@@ -1140,3 +1210,80 @@
 }
 .btnPrimary:hover:not(:disabled) { background: #1d4ed8; transform: translateY(-1px); }
 .btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Botón hamburger flotante (reemplaza el del toolbar eliminado).
+   Solo se muestra en mobile/tablet (≤1024px). En desktop el sidebar
+   está siempre visible, así que no hace falta.
+   ───────────────────────────────────────────────────────────────────── */
+.fabHamburger {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 48;          /* debajo del overlay del sidebar (z=49) */
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-surface, #131c33);
+  color: var(--text, #e0e7ff);
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.15));
+  border-radius: 10px;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.fabHamburger:hover { background: rgba(255,255,255,0.08); }
+.fabHamburger:active { transform: scale(0.95); }
+
+@media (max-width: 1024px) {
+  .fabHamburger { display: flex; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Toast container: mensajes flotantes arriba-derecha con autodismiss.
+   Reemplazan el feedback que vivía en el toolbar eliminado.
+   ───────────────────────────────────────────────────────────────────── */
+.toastContainer {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 360px;
+  pointer-events: none;  /* el container no bloquea clicks; cada item sí */
+}
+.toastItem {
+  pointer-events: auto;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+  border: 1px solid transparent;
+  animation: toastSlideIn 0.18s ease-out;
+  word-wrap: break-word;
+}
+.toastInfoItem {
+  background: rgba(34, 197, 94, 0.16);
+  color: #7dff9b;
+  border-color: rgba(34, 197, 94, 0.4);
+}
+.toastErrorItem {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ffadad;
+  border-color: rgba(239, 68, 68, 0.45);
+}
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 560px) {
+  .toastContainer { left: 12px; right: 12px; max-width: none; }
+}

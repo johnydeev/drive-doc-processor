@@ -1,6 +1,122 @@
 # Progreso del proyecto — drive-doc-processor
 
-Actualizado al 21/05/2026 (sesión 25).
+Actualizado al 25/05/2026 (sesión 26).
+
+---
+
+## Última sesión (25/05/2026)
+
+**UI urgente — separación de Boletas y Pagos:**
+- Quitados los botones "Pagar" / "Ver pagos" de la columna PAGO en la tabla
+  de Boletas. La columna ahora muestra solo el estado (`Pagada` / `Resta $X` / `—`).
+- Agregada columna **ACCIONES** al final de la tabla de PagosView con los
+  botones "Pagar" (modal cuotas/libre) y "Ver pagos" (historial), que conviven
+  con el flujo inline de carga rápida.
+- PagosView recibe los handlers vía props nuevas `onPagar` y `onVerPagos`.
+
+**UI urgente — fix NaN en header de Pagos:**
+- Bug: los totales del header mostraban `$ NaN` por concatenación de strings
+  (Prisma serializa Decimal como string, `reduce` armaba `"065000.2665000.08…"`).
+- Fix: helper `toNum()` con guarda `isFinite` aplicado a todos los sumandos.
+- Header simplificado a 2 métricas: **Pagos registrados** (suma `amount - remainingBalance`,
+  refleja cuotas parciales) y **Saldo impago del período**. Se eliminó
+  "Total del período" (redundante con la stat card de Boletas).
+
+**UI urgente — botones del scheduler al sidebar:**
+- "Pausar/Encender scheduler" y "Ejecutar ahora" salieron del toolbar superior.
+- Se ubicaron en el sidebar colapsable, arriba de "Cerrar sesión", con divisor.
+- Toolbar más limpio → más altura útil para la tabla principal.
+
+**UI urgente — eliminación del toolbar superior:**
+- Sacada la franja entera (`.toolbar` con themeToggle + hamburger + feedback).
+- Hamburger reubicado como **botón flotante** top-left (`.fabHamburger`),
+  visible solo en ≤1024px.
+- Feedback convertido en **toast flotante** top-right (`.toastContainer`)
+  con autodismiss (4s info / 5s error) y animación slide-in.
+- Toggle de tema eliminado — vive solo en `/admin`. Se respeta el
+  `data-theme` que haya dejado el panel principal al navegar.
+- Recuperados ~50px de altura útil para la tabla principal.
+
+**UI urgente — reorganización del detail header:**
+- **Navegador de período** (`‹ Mes Año ›`) movido al lado del nombre del
+  consorcio (nueva fila `.detailTitleRow` con flex inline). Ya no hay que
+  scrollear para cambiar de mes.
+- **Sección Servicios públicos (LSP)** ahora colapsable. `<h3>` → toggle
+  button con chevron `▸/▾`, título y badge contador. Default cerrado para
+  ahorrar espacio. Contenido (tabla + form) se monta on-demand.
+
+**Feature — eliminar boletas y pagos desde UI:**
+- `DELETE /api/client/consortiums/[id]/invoices/[invoiceId]`: bloquea
+  si tiene pagos, mueve PDF Drive scanned→pending, trashea Receipt
+  asociado, borra fila de Sheets (`deleteDimension`), borra Invoice+Receipt
+  en transacción. Atómico (aborta si Drive o Sheets fallan).
+- `DELETE /api/client/invoices/[id]/payments/[paymentId]`: solo último
+  pago; trashea comprobante, actualiza Sheets cols N/P/Q/R/S/T/U,
+  recalcula isPaid/remainingBalance. No revierte periodId.
+- Services nuevos: `Drive.trashFile`, `Drive.getFileParents`,
+  `Sheets.findInvoiceRow`, `Sheets.deleteInvoiceRow`.
+- UI: 🗑 + confirm inline (patrón LSP). Boletas → nueva columna ACCIONES.
+  Pagos → al lado de Cuotas/Ver pagos, solo si invoice tiene pagos.
+- Detalle completo en `docs/decisiones.md` (entrada 2026-05-25 — Eliminación).
+
+**UI urgente — refinamientos validación + importe es-AR:**
+- Mensaje de error incluye `Proveedor – N°comprobante`.
+- Input importe: `type=text` + `inputMode=decimal` + placeholder es-AR
+  ("85.000,16"). Helpers `parseAmountInput` (acepta coma o punto) y
+  `formatAmountPlain` (sin "$").
+
+**UI urgente — validación de campos requeridos al pagar:**
+- Inline + modal: fecha + importe + medio + comprobante son obligatorios.
+- Mensaje específico indicando qué falta. Inline acumula errores por fila.
+
+**UI urgente — columna COMPROBANTE inline en Pagos:**
+- Nueva columna con botón "📎 Adjuntar" para subir PDF de comprobante
+  junto al pago inline (antes solo desde el modal de Cuotas).
+- `PendingPaymentInput.file: File | null` + handler arma FormData si hay archivo.
+
+**UI urgente — espaciado de Pagos consistente:**
+- Removidos `marginBottom: 12` inline del statsStrip y searchRow de
+  PagosView; ahora usa el `gap: 16px` natural del `.main`.
+
+**UI urgente — header de Pagos con stat cards:**
+- Reemplazado `.pagosSummary` por `.statsStrip` + `.statCard` (mismo look que Boletas).
+- "Pagos registrados" muestra `{pagadas} de {total}` (cantidad de boletas).
+- "Saldo impago" mantiene el color naranja vía `.statWarn` cuando > 0.
+
+**UI urgente — totales fijos + stats con recuadro individual:**
+- Métricas del header (Boletas, Total período, Duplicados, Pagos
+  registrados, Saldo impago) ahora se calculan sobre el período completo,
+  no sobre el subset filtrado.
+- Cada `.statCard` con su propio border + background, todos inline.
+
+**UI urgente — microcopy + dropdown en modal de pago:**
+- Toggle "Pagar en cuotas" → "Cuotas fijas".
+- Campo "Medio de pago" del modal pasó de input libre a select con las
+  mismas 3 opciones que el inline.
+
+**UI urgente — medios de pago + botón Cuotas:**
+- Dropdown Medio de Pago: solo Débito automático, Transferencia, Efectivo.
+- Botón "Pagar" → "Cuotas" (clarifica que el modal es para cuotas; el pago
+  único se carga inline).
+- Prop `consortiumBank` removida de PagosView.
+
+**UI urgente — buscadores unificados:**
+- Boletas y Pagos filtran por `provider + boletaNumber + CUIT`, mismo placeholder.
+- Se sacó el matching por `detail` (ruidoso, poco usado).
+
+**UI urgente — scroll en tablas largas:**
+- `.tableWrap` con `max-height: 65vh` + `overflow: auto` y `<thead>` sticky.
+  Aplica a Boletas, Pagos y modal "Ver pagos".
+
+**UI urgente — stats inline + buscador en Pagos:**
+- **Stats Strip** (Boletas / Total período / Duplicados / Rubros) pasó de
+  4 cards grandes en grid a una sola línea horizontal con label + valor
+  inline (`display: flex` con wrap). ~50px menos de altura.
+- **Buscador en pestaña Pagos** con misma UI que Boletas. Filtra por
+  proveedor y N° de comprobante; los totales del header se recalculan
+  sobre el subset filtrado (útil para ver saldo por proveedor).
+
+Detalle completo en `docs/decisiones.md` y `CHANGELOG.md` (entradas 2026-05-25).
 
 ---
 

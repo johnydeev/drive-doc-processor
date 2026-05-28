@@ -511,6 +511,93 @@ export class GoogleSheetsService {
    * boletas correspondiente a una invoice. Cada campo es opcional — solo se actualizan
    * los presentes en `values`. Búsqueda análoga a updatePaymentStatus.
    */
+  /**
+   * Busca la fila (1-based) de una boleta por sourceFileUrl o boletaNumber+providerTaxId.
+   * Retorna -1 si no encuentra. Helper compartido entre updateInvoicePaymentInfo
+   * y deleteInvoiceRow.
+   */
+  async findInvoiceRow(
+    sheetName: string,
+    mapping: SheetsRowMapping,
+    keys: { boletaNumber?: string | null; sourceFileUrl?: string | null; providerTaxId?: string | null }
+  ): Promise<number> {
+    const range = this.getRangeFromMapping(sheetName, mapping);
+    const response = await this.withRetry(() =>
+      this.sheets.spreadsheets.values.get({ spreadsheetId: this.spreadsheetId, range })
+    );
+    const rows = response.data.values ?? [];
+    if (rows.length < 2) return -1;
+
+    const columnOffsets = Object.values(mapping).map((c) => this.columnToIndex(c));
+    const minIndex = Math.min(...columnOffsets);
+    const idx = (col: string) => this.columnToIndex(col) - minIndex;
+
+    const boletaIdx = idx(mapping.boletaNumber);
+    const sourceIdx = idx(mapping.sourceFileUrl);
+    const taxIdx = idx(mapping.providerTaxId);
+
+    const targetSource = (keys.sourceFileUrl ?? "").trim();
+    const targetBoleta = (keys.boletaNumber ?? "").trim();
+    const targetTax = (keys.providerTaxId ?? "").replace(/\D/g, "");
+
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i];
+      const sourceCell = (row[sourceIdx] ?? "").toString().trim();
+      const boletaCell = (row[boletaIdx] ?? "").toString().trim();
+      const taxCell = (row[taxIdx] ?? "").toString().replace(/\D/g, "");
+
+      if (targetSource && sourceCell && sourceCell === targetSource) return i + 1;
+      if (
+        targetBoleta &&
+        boletaCell &&
+        boletaCell === targetBoleta &&
+        (!targetTax || !taxCell || taxCell === targetTax)
+      ) {
+        return i + 1;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * Borra una fila completa de la hoja (no la blanquea — la elimina con shift up).
+   * Usado al eliminar una boleta. Si no encuentra la fila, no hace nada.
+   */
+  async deleteInvoiceRow(
+    sheetName: string,
+    mapping: SheetsRowMapping,
+    keys: { boletaNumber?: string | null; sourceFileUrl?: string | null; providerTaxId?: string | null }
+  ): Promise<boolean> {
+    const rowNumber = await this.findInvoiceRow(sheetName, mapping, keys);
+    if (rowNumber < 2) return false;
+
+    const sheetId = await this.getSheetId(sheetName);
+    if (sheetId === null) return false;
+
+    // Sheets API usa índices 0-based; rowNumber es 1-based. Restamos 1 para que
+    // startIndex apunte al "row index" interno. endIndex es exclusivo.
+    await this.withRetry(() =>
+      this.sheets.spreadsheets.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              deleteDimension: {
+                range: {
+                  sheetId,
+                  dimension: "ROWS",
+                  startIndex: rowNumber - 1,
+                  endIndex: rowNumber,
+                },
+              },
+            },
+          ],
+        },
+      })
+    );
+    return true;
+  }
+
   async updateInvoicePaymentInfo(
     sheetName: string,
     mapping: SheetsRowMapping,

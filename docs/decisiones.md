@@ -4,6 +4,473 @@ Registro de decisiones tomadas ante problemas reales encontrados en producción.
 
 ---
 
+## 2026-05-25 — Eliminación de boletas y pagos desde la UI
+
+### Problema
+La UI permitía cargar boletas y pagos pero no había forma de eliminar
+errores desde el panel: ni una boleta cargada con datos incorrectos, ni
+un pago registrado por equivocación. La única alternativa era pedir
+acceso directo a Supabase. Con la operación a escala (varios consorcios
+× varios meses) esto se volvió bloqueante.
+
+Cualquier "eliminar" toca 3 sistemas que pueden divergir:
+- DB (Prisma): `Invoice`, `Receipt`, `Payment`.
+- Google Drive: PDF de la boleta + PDF del recibo (si hay) +
+  comprobante del pago (si hay).
+- Google Sheets: fila de la boleta + columnas Q/R/S/T/U que reflejan el
+  estado del pago.
+
+### Decisión
+**Dos endpoints DELETE con flujo Drive → Sheets → DB** (las APIs externas
+primero; si fallan, se aborta antes de tocar DB para evitar inconsistencias).
+
+#### Eliminar boleta — `DELETE /api/client/consortiums/[id]/invoices/[invoiceId]`
+- **Validaciones**:
+  - Pertenencia: boleta del cliente y del consorcio (404 si no).
+  - **Bloqueo si tiene pagos** (`_count.payments > 0`): responde 409 con
+    "Eliminá los pagos primero". Evita borrados accidentales con
+    historial de pagos.
+- **Efectos** (orden):
+  1. Mueve el PDF en Drive de `scanned` → `pending`. Si no estaba en
+     scanned, intenta desde `unassigned`. Si no estaba en ninguna,
+     usa la primera carpeta padre que devuelva `getFileParents`. Si el
+     archivo no tiene padre conocido (raro), no se mueve. El archivo
+     **no se borra** — vuelve a la cola para reprocesar.
+  2. Si la boleta tiene un `Receipt` asociado (recibo manual subido
+     desde la UI hace tiempo), manda el PDF del receipt a la papelera
+     de Drive (no es parte del pipeline, no hay carpeta a la que
+     "mover", así que se trashea).
+  3. Borra la fila completa en Sheets con `deleteDimension`
+     (`spreadsheets.batchUpdate`). NO la blanquea — la fila desaparece
+     y las de abajo suben.
+  4. Borra `Invoice` + `Receipt` de DB en una transacción Prisma.
+- **Atomicidad**: si Drive o Sheets fallan, se responde 502 sin tocar
+  DB. La única ventana de inconsistencia es si Sheets falla DESPUÉS de
+  Drive (el archivo ya se movió pero la fila sigue) — aceptable porque
+  la fila queda con datos válidos y el user puede reintentar.
+
+#### Eliminar pago — `DELETE /api/client/invoices/[id]/payments/[paymentId]`
+- **Validaciones**:
+  - Pertenencia: payment del cliente y de la invoice (404/403/400).
+  - **Solo el último pago**: si no es el `[0]` de
+    `orderBy: { createdAt: desc }`, responde 409. Esto es restricción
+    heredada del `PaymentRepository.deletePayment` original — borrar
+    cuotas intermedias rompería el orden de installmentNumber y
+    requeriría reordenar todo. Mantener simple.
+- **Efectos** (orden):
+  1. Si el pago tenía comprobante (`driveFileId`), lo trashea en Drive.
+  2. Calcula sin tocar DB: `newRemaining = invoiceAmount - sum(otros pagos)`
+     y si quedan otros pagos `prevPayment = allPayments[1]`.
+  3. Actualiza Sheets cols N/P/Q/R/S/T/U:
+     - Si `willStillHavePayments`: escribe el resumen del `prevPayment`
+       (fecha, importe acumulado, medio, comprobante URL, installmentNumber).
+     - Si no quedan pagos: limpia las 5 celdas y deja estado "Impago".
+  4. Borra `Payment` + actualiza `Invoice.isPaid` / `remainingBalance`
+     en transacción Prisma.
+- **NO se revierte `periodId`** si la boleta había sido reasignada al
+  mes siguiente por pago parcial. Esto evita complicar la lógica con
+  un "deshacer" del bookkeeping; el usuario puede ajustar manualmente
+  si necesita.
+
+#### UI
+- **Botón 🗑 + confirm inline** (mismo patrón visual que LSP services
+  para consistencia). Estados locales `confirmDeleteInvoiceId` y
+  `confirmDeletePaymentInvoiceId` se resetean al cambiar de consorcio.
+- **Boletas**: nueva columna ACCIONES al final (no se reúsa la columna
+  PAGO porque esa es estado visual).
+- **Pagos**: el 🗑 va al lado de Cuotas/Ver pagos en la columna
+  ACCIONES existente. Solo aparece si la invoice tiene `isPaid` o
+  `remainingBalance < amount` (= tiene al menos un pago).
+- Feedback via toasts (`toolbarInfo` / `toolbarError`).
+
+### Alternativas descartadas
+- **Borrar archivo de Drive en vez de trashear** (`files.delete`):
+  irreversible. Trash es recuperable desde la UI de Drive. Aceptamos
+  el costo de cuota de storage temporal a cambio de seguridad.
+- **Permitir borrar cuotas intermedias del medio**: rompería el orden
+  de `installmentNumber` y requeriría reordenar los siguientes. Mucho
+  código por un caso de uso marginal.
+- **Cascade delete de boleta con pagos**: tentador pero peligroso —
+  un click accidental borraría boletas con historial completo. Forzar
+  al user a borrar pagos primero es un speed bump deliberado.
+- **Borrar fila de Sheets blanqueándola en vez de `deleteDimension`**:
+  dejaría filas vacías intermedias rompiendo el orden visual y
+  confundiendo cualquier consumer downstream (sync, reportes).
+- **DELETE atómico con rollback de Drive**: requeriría un "untrashFile"
+  si la DB falla después de trashear. Posible (`trashed: false`) pero
+  complejidad alta para un edge case raro.
+- **Permitir a ADMIN además de CLIENT**: ampliaría la superficie de
+  error. Si un cliente necesita ayuda, contacta soporte y se opera
+  por DB directa.
+
+### Impacto
+- `src/services/googleDrive.service.ts`: `trashFile()`, `getFileParents()`.
+- `src/services/googleSheets.service.ts`: `findInvoiceRow()` (helper
+  extraído del lookup que ya tenía `updateInvoicePaymentInfo`),
+  `deleteInvoiceRow()` (usa `getSheetId` + `deleteDimension`).
+- `src/app/api/client/consortiums/[id]/invoices/[invoiceId]/route.ts`:
+  nuevo (DELETE).
+- `src/app/api/client/invoices/[id]/payments/[paymentId]/route.ts`:
+  reescrito (antes solo llamaba al repo; ahora orquesta Drive + Sheets
+  + DB).
+- `src/app/admin/consortiums/page.tsx`: states
+  `confirmDeleteInvoiceId` / `deletingInvoiceId`, handler
+  `handleDeleteInvoice`, columna ACCIONES en tabla Boletas, prop nueva
+  `onEliminarUltimoPago` para PagosView con confirm inline.
+- Mejora: el cliente puede recuperarse de errores sin pedir acceso a DB.
+- Riesgo residual: si el usuario borra una boleta + pago + comprobante y
+  10 segundos después se arrepiente, el archivo está en trash de Drive
+  pero la fila de Sheets ya se eliminó. La fila no se restaura — hay
+  que recargar el PDF.
+
+---
+
+## 2026-05-25 — Stats inline + buscador en pestaña Pagos
+
+### Problema
+1. Las 4 stat cards de la pestaña Boletas (Boletas, Total período,
+   Duplicados, Rubros) estaban en un grid 4×1 con cada card en formato
+   "label arriba, valor abajo" (font-size 22px para el valor) — ocupaban
+   ~80px de altura aún cuando la info es densamente expresable en una
+   línea.
+2. La pestaña Pagos no tenía buscador. Si el usuario tenía 30 boletas
+   en el período y quería pagar la de un proveedor específico, tenía
+   que scrollear toda la tabla a mano.
+
+### Decisión
+1. **Stats Strip horizontal**: `.statsStrip` pasó de `display: grid;
+   grid-template-columns: repeat(4, ...)` a `display: flex; flex-wrap:
+   wrap; gap: 8px 22px`. Cada `.statCard` ahora es `inline-flex` con
+   `align-items: baseline; gap: 8px`, mostrando label y valor en la
+   misma línea. Valor reducido de 22px a 15px (más coherente con el
+   tamaño inline). Padding del container reducido (10px 16px). En mobile
+   (`<768px`) el gap y padding bajan; el `flex-wrap` ya maneja el
+   reflow sin necesidad de media queries con `grid-template-columns`.
+   Resultado: ~50px menos de altura para una info que era 100% lineal.
+
+2. **Buscador en PagosView**: state local nuevo `search` (separado del
+   `search` de Boletas — cada pestaña tiene su propio contexto). Filtra
+   `allVisible` por `provider.includes(q) || boletaNumber.includes(q)`,
+   case-insensitive. Reusa las clases CSS del buscador de Boletas
+   (`.searchRow`, `.searchInput`, `.clearSearch`) — cero duplicación de
+   estilos. Empty state diferencia "no resultados de búsqueda" vs "no
+   hay boletas en el período". **Los totales del header se calculan
+   sobre el subset filtrado**, decisión deliberada: al buscar un
+   proveedor, el header muestra cuánto pagaste y cuánto debés a ese
+   proveedor específico (más útil que mantener los totales del período
+   completo cuando estás filtrando).
+
+### Alternativas descartadas
+- **State `search` compartido entre Boletas y Pagos**: tentador
+  (escribir en una y pasar a la otra), pero confunde — el usuario
+  filtra "Edesur" en Boletas para ver las facturas, cambia a Pagos
+  esperando ver todos los pagos, y de repente está pre-filtrado. Cada
+  pestaña tiene su contexto.
+- **Stats como una línea sin background**: descartado, perdía la
+  diferenciación visual del bloque.
+- **Stats con separadores `·` entre items**: probado mental — queda
+  menos legible que items separados por gap horizontal.
+
+### Impacto
+- `src/app/admin/consortiums/page.module.css`:
+  - `.statsStrip` reescrita a flex.
+  - `.statCard` reescrita a inline-flex baseline.
+  - `.statLabel` letter-spacing reducido (0.12em → 0.08em) para que se
+    lea mejor a tamaño inline.
+  - `.statValue` font-size 22px → 15px.
+  - Media queries antiguas con `grid-template-columns` reemplazadas.
+- `src/app/admin/consortiums/page.tsx`:
+  - PagosView: nuevo state `search`, filtro local `visibleInvoices`
+    derivado de `allVisible`. JSX del buscador antes del header.
+    Empty state condicional.
+- Mejora UX: layout más compacto en Boletas, búsqueda funcional en
+  Pagos, mismo widget y look-and-feel cross-pestaña.
+
+---
+
+## 2026-05-25 — Reorganización del detail header: período inline + LSP colapsable
+
+### Problema
+La vista de un consorcio en `/admin/consortiums` tenía dos problemas de
+organización visual:
+1. El **navegador de período** (`‹ Mes Año ›`) vivía debajo de la sección
+   LSP, lo cual obligaba a hacer scroll cada vez que el usuario quería
+   cambiar de mes — interacción frecuente que no merecía estar tan abajo.
+2. La sección **Servicios públicos (LSP)** ocupaba ~5 renglones fijos
+   (título + tabla con servicios + formulario de alta), aún cuando el
+   usuario nunca interactúa con ella en sesiones normales (los servicios
+   ya vienen cargados desde el archivo ALTA).
+
+### Decisión
+1. **Mover el navegador de período al `detailHeader`**, inline al lado del
+   nombre del consorcio. Para esto se introdujo una nueva fila
+   `.detailTitleRow` con `display: flex; gap: 18px; flex-wrap: wrap;`
+   que contiene `<h2>` y `.periodNav`. El `CUIT:` queda debajo en la
+   meta-línea como antes. En mobile el `flex-wrap` permite que el
+   navegador caiga abajo si no entra al lado.
+2. **Sección LSP colapsable** con estado local `lspCollapsed` (default
+   `true` = cerrada). El `<h3>` se transformó en un `<button>`
+   (`.lspToggle`) con:
+   - Chevron `▸` (cerrado) / `▾` (abierto).
+   - Título "Servicios públicos (LSP)".
+   - Badge contador (`.lspToggleCount`) con la cantidad de servicios,
+     solo visible si hay alguno. Permite ver de un vistazo si hay LSPs
+     sin tener que expandir.
+   - `aria-expanded` y `aria-controls` apuntando al div de contenido
+     para a11y.
+   El contenido (tabla + formulario) se renderiza condicionalmente con
+   `{!lspCollapsed && ...}` — no se montan los inputs hasta que la
+   sección esté abierta. Estado session-only (no persiste).
+
+### Alternativas descartadas
+- **Default LSP abierto**: descartado porque no resuelve el problema
+  visual. Si el user lo quiere ver, expande en 1 click.
+- **Default LSP abierto si hay servicios, cerrado si no**: lógica
+  condicional con `useEffect` agrega complejidad sin un beneficio claro.
+  Default cerrado uniforme es más predecible.
+- **Periodo en su propia fila debajo del header (sin moverlo a inline)**:
+  ahorraba algo de scroll pero seguía consumiendo altura vertical fija.
+  Inline al lado del título reutiliza espacio horizontal disponible.
+- **Animación de altura para el colapsado**: omitida por ahora — el
+  contenido del LSP es variable (tabla + form) y animar `max-height`
+  con valor desconocido es feo. Si el user pide animación, se evalúa.
+
+### Impacto
+- `src/app/admin/consortiums/page.tsx`:
+  - Nuevo state `lspCollapsed` con default `true`.
+  - JSX del `detailHeader`: nuevo wrapper `.detailTitleRow` con título +
+    periodNav inline.
+  - JSX del `lspSection`: `<h3>` → `<button .lspToggle>` con chevron,
+    título y badge contador. Contenido envuelto en `<div .lspContent>`
+    con render condicional `{!lspCollapsed && ...}`.
+  - Eliminado el `<div .periodNav>` viejo que estaba abajo del LSP.
+- `src/app/admin/consortiums/page.module.css`:
+  - Nueva clase `.detailTitleRow`.
+  - Nuevas clases `.lspToggle`, `.lspToggleChevron`, `.lspToggleCount`,
+    `.lspContent`. `.lspTitle` simplificado (sin `margin-bottom`,
+    ahora vive dentro del botón). `.lspSection` con `padding-top` y
+    `padding-bottom` reducidos a 10px (menos aire vertical en
+    estado colapsado).
+- Mejora UX: menos scroll, menos ruido visual por default,
+  cambio de período en 1 click sin perder contexto.
+
+---
+
+## 2026-05-25 — Eliminación del toolbar superior en /admin/consortiums
+
+### Problema
+La franja `<div className={styles.toolbar}>` arriba del contenido principal
+de `/admin/consortiums` ocupaba ~50px de altura constantes en todas las
+resoluciones, empujando hacia abajo la tabla de boletas/pagos. Después
+de las iteraciones previas (botones del scheduler movidos al sidebar),
+el toolbar quedó casi vacío: solo hamburger mobile + mensajes de feedback
++ toggle de tema. El usuario pidió eliminarlo para recuperar esa altura
+para el contenido.
+
+Restricciones a respetar:
+1. El hamburger sigue siendo necesario en mobile/tablet (≤1024px) para
+   abrir el sidebar lateral.
+2. Los mensajes `toolbarInfo` / `toolbarError` se siguen seteando desde
+   los handlers (Sincronizar, Proteger, etc.) y hay que mostrarlos en
+   algún lado.
+3. El toggle de tema ya existe en el panel principal (`/admin`).
+
+### Decisión
+1. **Eliminar el `<div className={styles.toolbar}>` completo**, incluidos
+   `.toolbarLeft`, `.toolbarRight` y los wrappers internos. Las clases
+   CSS del toolbar viejo (`.toolbar`, `.toolbarBtn`, `.themeToggle`,
+   etc.) se dejan en `page.module.css` por si se reutilizan más adelante
+   — no rompen nada y mantienen historial visible.
+2. **Hamburger → botón flotante** (`.fabHamburger`): `position: fixed`
+   top-left, `z-index: 48` (debajo del overlay del sidebar en z=49),
+   `display: none` por default, `display: flex` con media query
+   `max-width: 1024px`. Tamaño 40x40, sombra suave, icono ☰.
+3. **Feedback → toast flotante** (`.toastContainer` + `.toastItem`):
+   `position: fixed` top-right, `z-index: 60`, max-width 360px. Animación
+   `toastSlideIn` (0.18s). Variantes `.toastInfoItem` (verde) y
+   `.toastErrorItem` (rojo). En mobile (≤560px) el container ocupa el
+   ancho completo. **Autodismiss** vía `useEffect` con `setTimeout`:
+   4s info, 5s error. Antes los mensajes quedaban hasta la próxima
+   acción y se acumulaba contexto stale.
+4. **Toggle de tema → solo en /admin**. Eliminado el handler
+   `handleToggleTheme`. El state `theme` se mantiene (sirve para
+   aplicar `data-theme` al `<html>`) y se inicializa leyendo el
+   atributo `data-theme` que haya dejado el panel principal al
+   navegar:
+
+   ```ts
+   useEffect(() => {
+     const current = document.documentElement.getAttribute("data-theme");
+     if (current === "light" || current === "dark") setTheme(current);
+   }, []);
+   ```
+
+   Esto fixea un bug latente: antes el theme se hardcodeaba a "dark" al
+   montar `/admin/consortiums`, sobreescribiendo cualquier cosa que
+   hubiera dejado `/admin`. Ahora respeta la preferencia del usuario.
+
+### Alternativas descartadas
+- **Mover hamburger al header "Edificios"**: descartado porque ocuparía
+  ancho horizontal dentro del contenido (peor que el toolbar para mobile).
+  El botón flotante es invisible en desktop (`display: none`) y no roba
+  espacio del layout.
+- **Mantener el toolbar solo para feedback**: descartado porque mantenía
+  altura constante (~50px) aún cuando no hay mensajes — el toast solo
+  toma espacio cuando hay algo que mostrar.
+- **Persistir theme en localStorage**: tentador pero fuera del scope.
+  El user solo pidió sacar el toggle local; el approach actual (leer
+  data-theme al mount) cubre el caso real sin agregar storage handling.
+
+### Impacto
+- `src/app/admin/consortiums/page.tsx`:
+  - Eliminado `handleToggleTheme` y todo el JSX del toolbar.
+  - Nuevo `useEffect` para leer `data-theme` inicial.
+  - Nuevos `useEffect` para autodismiss de `toolbarInfo` y `toolbarError`.
+  - JSX del botón flotante y del toast container montados al inicio del
+    page (afuera del contentCol para que `position: fixed` funcione bien).
+- `src/app/admin/consortiums/page.module.css`:
+  - Nuevas clases `.fabHamburger`, `.toastContainer`, `.toastItem`,
+    `.toastInfoItem`, `.toastErrorItem`, keyframe `toastSlideIn`.
+- Mejora UX: ~50px más de altura útil para la tabla, mensajes con
+  autodismiss más modernos, theme respetado cross-page.
+
+---
+
+## 2026-05-25 — Fix NaN en totales de Pagos + consolidación de header
+
+### Problema
+En la pestaña Pagos, el header mostraba `Total del período: $ NaN`,
+`Pagos del mes actual: $ 0,00` y `Gastos con saldo impago: $ NaN` aún
+con boletas reales cargadas en el período. Causa raíz: Prisma serializa
+`Decimal` como **string** en el JSON de respuesta del endpoint
+`/api/client/consortiums/:id/invoices`. El `reduce` de los totales hacía
+`sum + (inv.amount ?? 0)` — JavaScript evalúa `0 + "65000.26"` = `"065000.26"`
+(string concat), y la siguiente iteración da `"065000.2665000.08"`, que
+al pasar por `Intl.NumberFormat.format(...)` no parsea → `NaN`.
+
+Por qué la columna IMPORTE de la misma tabla se veía bien: porque ahí
+se llamaba `formatAmount(totalAmount)` con un valor único (string parseable
+"65000.26"), no con el resultado de un reduce contaminado.
+
+### Decisión
+1. **Helper `toNum(v)`** dentro de `PagosView` que convierte string/number/null
+   a número con guarda `Number.isFinite` (devuelve 0 si no es finito). Se
+   aplica a todos los `inv.amount` y `inv.remainingBalance` antes de sumar.
+2. **Recalcular "Pagos registrados"** con semántica correcta:
+   `amount - remainingBalance` por boleta. El cálculo anterior sumaba
+   `inv.amount` solo de las marcadas `isPaid` → ignoraba pagos parciales
+   en cuotas (no se reflejaban hasta que la boleta estaba 100% pagada).
+3. **Eliminar "Total del período"** del header de Pagos: ya está visible
+   como stat card en la pestaña Boletas (mismo número, dos lugares =
+   ruido). El usuario alterna pestañas para verlo si lo necesita.
+4. **Renombrar "Pagos del mes actual" → "Pagos registrados"**: era confuso
+   porque "mes actual" sugería mes calendario, pero el cálculo era sobre
+   el período seleccionado (que puede no ser el mes corriente).
+
+### Alternativas descartadas
+- **Serializar Decimal como Number en el endpoint**: tentador pero
+  arriesgado — perdés precisión para montos grandes y hay otros consumidores
+  (sync-payments, repositories) que asumen string. Mejor convertir en el
+  consumer puntual.
+- **`Number(v) || 0` en vez del helper con `isFinite`**: `Number("")` da
+  `0`, pero `Number(null)` también da `0` — funcionaría, pero no captura
+  el caso `Number("abc")` → `NaN || 0` = `0` que sí funciona en realidad.
+  Igual el helper es más explícito y reutilizable.
+
+### Impacto
+- `src/app/admin/consortiums/page.tsx`:
+  - `PagosView`: helper `toNum`, recálculo de `totalPagado` y `totalImpago`,
+    `totalPendiente` también usa `toNum` para consistencia.
+  - Header `pagosSummary`: dos métricas en vez de tres.
+- Mejora: el usuario ve totales correctos al cargar la pestaña Pagos.
+
+---
+
+## 2026-05-25 — Botones del scheduler movidos del toolbar al sidebar
+
+### Problema
+El toolbar superior de la pestaña principal tenía los botones "Pausar
+scheduler" (o "Encender scheduler") y "Ejecutar ahora" del lado izquierdo,
+ocupando espacio visual horizontal arriba de la tabla principal de
+boletas/pagos. En pantallas medianas esto comía altura y empujaba la
+tabla hacia abajo. Además, conceptualmente esos controles pertenecen al
+chrome de la app (igual que "Cerrar sesión"), no al contenido de la
+vista actual.
+
+### Decisión
+Mover ambos botones al sidebar colapsable izquierdo, agrupados en el
+footer del sidebar (arriba de "Cerrar sesión") y separados por un
+`<div className={styles.navSidebarDivider} />`. Mantienen exactamente
+los mismos handlers (`handleToggleScheduler`, `handleRunNow`) y reaccionan
+al mismo estado (`paused`, `schedulerEnabled`, `busyAction`) — solo
+cambia el contenedor.
+
+Iconos elegidos:
+- ⏸️ cuando el scheduler está corriendo (acción: pausar).
+- ▶️ cuando está pausado (acción: encender).
+- ⚡ para "Ejecutar ahora" (acción manual instantánea).
+
+El toolbar superior queda minimal: hamburger menu (mobile) y mensajes de
+feedback (`toolbarInfo` / `toolbarError`).
+
+### Impacto
+- `src/app/admin/consortiums/page.tsx`: dos bloques de `<button>` movidos
+  de `<div className={styles.toolbarLeft}>` a antes del botón "Cerrar
+  sesión" en el sidebar. Toolbar simplificado.
+- Mejora: más altura útil para la tabla principal, sidebar agrupa todas
+  las acciones de control de sesión/scheduler en un solo lugar.
+
+---
+
+## 2026-05-25 — Separación UI Boletas / Pagos (single responsibility por pestaña)
+
+### Problema
+La tabla de la pestaña **Boletas** mostraba en la columna PAGO los botones
+"Pagar" (que abre el modal de cuotas/libre) y "Ver pagos" (historial). La
+pestaña **Pagos** tenía además su propio flujo inline de carga rápida
+(inputs fecha/importe/medio en cada fila + GUARDAR al pie). Resultado:
+dos entry points distintos para la misma acción, con dos UIs distintas,
+en dos pestañas distintas. El usuario no sabía cuál usar y los datos del
+mismo flujo se cargaban desde lugares inconsistentes.
+
+### Decisión
+Dejar cada pestaña con una sola responsabilidad:
+- **Boletas**: solo datos de boletas. La columna PAGO conserva el indicador
+  visual (`Pagada` / `Resta $X` / `—`) porque sirve para tener contexto de
+  estado al revisar la lista, pero **sin botones de acción**.
+- **Pagos**: única superficie para gestionar pagos. Conserva el flujo inline
+  rápido (sirve para el 80% de los casos: pago simple a fecha de hoy) y suma
+  una nueva columna **ACCIONES** al final de cada fila con los botones
+  "Pagar" (modal cuotas/libre, para el 20% con casos complejos) y "Ver pagos"
+  cuando `isPaid` (modal de historial read-only).
+
+Los modales (`payModalInvoice` y `viewPaymentsInvoice`) y sus handlers
+(`handleOpenPayModal`, `handleOpenViewPayments`) siguen viviendo en el
+componente padre `AdminConsortiumsPage`. PagosView los recibe vía props
+nuevas `onPagar(inv)` y `onVerPagos(inv)`. Esto evita duplicar estado
+en PagosView y mantiene los modales montados a nivel página.
+
+### Alternativas descartadas
+- **Eliminar la columna PAGO entera de Boletas**: descartado porque el
+  estado de pago es info útil al revisar boletas (sin tener que cambiar
+  de pestaña).
+- **Eliminar el flujo inline de Pagos y dejar solo los modales**:
+  descartado porque el inline es más rápido para el caso simple (cargar
+  un pago único sin cuotas) y ya está implementado.
+- **Eliminar el código de los modales**: descartado porque "Pagar en
+  cuotas" y "Ver historial detallado" requieren modal — no se pueden
+  resolver inline.
+
+### Impacto
+- `src/app/admin/consortiums/page.tsx`:
+  - Tabla Boletas, columna PAGO: ahora solo span con badge de estado.
+  - `PagosViewProps`: agregadas props `onPagar` y `onVerPagos`.
+  - Tabla PagosView: nueva columna `<th>ACCIONES</th>` con botón Pagar / Ver pagos según `isPaid`.
+  - Render del padre: pasa `handleOpenPayModal` y `handleOpenViewPayments` a PagosView.
+- Mejora UX: cero ambigüedad sobre dónde cargar pagos.
+
+---
+
 ## 2026-05-25 — Healthcheck real con verificación de DB + límites de recursos
 
 ### Problema 1 — Healthcheck con falso positivo

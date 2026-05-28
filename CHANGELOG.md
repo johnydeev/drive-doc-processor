@@ -2,6 +2,250 @@
 
 ## [Unreleased]
 
+### Features
+- **Eliminación de boletas y pagos desde la UI (2026-05-25)**. Dos endpoints
+  nuevos y dos controles inline (ícono 🗑 + confirm "¿Borrar? Sí/No"):
+  - `DELETE /api/client/consortiums/[id]/invoices/[invoiceId]` — elimina
+    una boleta. Validaciones: pertenece al cliente + 0 pagos asociados
+    (si tiene → 409, hay que borrar los pagos antes). Efectos:
+      - Mueve el PDF en Drive `scanned` → `pending` (fallback: la carpeta
+        actual del archivo si no está en scanned ni unassigned). Si el
+        archivo no estaba en una carpeta conocida, no se mueve.
+      - Si la boleta tenía un `Receipt` asociado (recibo manual), manda
+        el PDF a la papelera de Drive y borra la fila de Receipt.
+      - Borra la fila completa en Sheets (`deleteDimension` — no la
+        blanquea).
+      - Borra el Invoice de DB en transacción con el Receipt.
+    Atómico: Drive y Sheets se ejecutan antes que DB; si fallan, se aborta
+    con HTTP 502 sin tocar DB.
+  - `DELETE /api/client/invoices/[id]/payments/[paymentId]` — elimina un
+    pago. Restricción: solo el último pago registrado (validación
+    heredada del `PaymentRepository`). Efectos:
+      - Si el pago tenía comprobante (`driveFileId`), lo manda a la
+        papelera de Drive.
+      - Actualiza Sheets cols N/P/Q/R/S/T/U: si quedan otros pagos
+        escribe el resumen del más reciente, si no limpia las celdas y
+        deja estado "Impago".
+      - Borra el Payment de DB + recalcula `isPaid` y `remainingBalance`
+        de la Invoice (transacción Prisma).
+    NO revierte el `periodId` si la boleta fue reasignada al mes
+    siguiente por pago parcial.
+  - Servicios nuevos: `GoogleDriveService.trashFile(fileId)`,
+    `GoogleDriveService.getFileParents(fileId)`,
+    `GoogleSheetsService.findInvoiceRow(...)`,
+    `GoogleSheetsService.deleteInvoiceRow(...)`.
+  - UI: botón 🗑 con confirm inline (mismo patrón que LSP services).
+    Boletas: nueva columna ACCIONES al final. Pagos: el 🗑 va al lado
+    del botón Cuotas/Ver pagos en la columna ACCIONES existente, y solo
+    aparece si la boleta tiene al menos un pago registrado. Toasts
+    de feedback (`toolbarInfo` / `toolbarError`).
+  Solo CLIENT puede invocar estos endpoints.
+  Archivos: `src/services/googleDrive.service.ts`,
+  `src/services/googleSheets.service.ts`,
+  `src/app/api/client/consortiums/[id]/invoices/[invoiceId]/route.ts`
+  (nuevo),
+  `src/app/api/client/invoices/[id]/payments/[paymentId]/route.ts`
+  (reescrito),
+  `src/app/admin/consortiums/page.tsx`.
+
+### UI / UX
+- **Mensaje de error incluye N° de comprobante + input importe en formato
+  es-AR (2026-05-25)**. El mensaje de validación de pagos inline ahora
+  muestra `Proveedor – N°comprobante: falta X` (antes solo el proveedor).
+  El input "IMPORTE PAGO" pasó de `type="number"` a `type="text"` con
+  `inputMode="decimal"`. Placeholder formateado con `Intl.NumberFormat`
+  es-AR (ej: "85.000,16"). Helper `parseAmountInput()` acepta ambos
+  formatos al guardar (coma o punto decimal). Helper `formatAmountPlain()`
+  para placeholders sin símbolo de moneda.
+  Archivo: `src/app/admin/consortiums/page.tsx`.
+
+- **Validación de campos requeridos al registrar pago (2026-05-25)**.
+  Tanto el flujo inline como el modal exigen ahora fecha de pago, importe
+  (salvo empleados, que se autocalcula), medio de pago y comprobante PDF.
+  Si falta alguno, mensaje específico ("falta fecha de pago, comprobante
+  PDF"). Inline acumula errores por fila ("Proveedor X: falta..."). Modal
+  acumula todos los faltantes en un solo mensaje. Label "Comprobante PDF
+  (opcional)" → "Comprobante PDF".
+  Archivo: `src/app/admin/consortiums/page.tsx`.
+
+- **Columna COMPROBANTE inline en Pagos (2026-05-25)**. Nueva columna
+  entre MEDIO DE PAGO y ACCIONES con botón "📎 Adjuntar" para subir
+  un PDF junto al pago inline (antes solo se podía adjuntar via el
+  modal de Cuotas). `PendingPaymentInput` extendido con `file: File | null`
+  y `handleGuardarPagos` arma FormData cuando hay archivo (mantiene
+  JSON cuando no, para no romper el flujo existente).
+  Archivo: `src/app/admin/consortiums/page.tsx`.
+
+- **Label del período en mayúsculas (2026-05-25)**. `text-transform:
+  uppercase` en `.periodNavLabel` ("Mayo 2026" → "MAYO 2026"). Archivo:
+  `src/app/admin/consortiums/page.module.css`.
+
+- **Espaciado de Pagos consistente con Boletas (2026-05-25)**. Removidos
+  los `marginBottom: 12` inline del `statsStrip` y `searchRow` de
+  PagosView — `.main` ya aporta `gap: 16px` entre hijos. Mismo ritmo
+  vertical que Boletas. Archivo: `src/app/admin/consortiums/page.tsx`.
+
+- **Header de Pagos con stat cards y "X de Y" en Pagos registrados
+  (2026-05-25)**. El header de la pestaña Pagos pasó de
+  `.pagosSummary` (spans inline) a `.statsStrip` + `.statCard` (mismo
+  diseño de recuadros que Boletas). "Pagos registrados" ahora muestra
+  `{pagadas} de {total}` (cantidad de boletas, no monto) — más
+  intuitivo para saber cuántas faltan cobrar. "Saldo impago" mantiene
+  el color naranja vía `.statWarn` cuando el valor es > 0.
+  Archivo: `src/app/admin/consortiums/page.tsx`.
+
+- **Totales del header desacoplados del filtro + cada stat en su propio
+  recuadro (2026-05-25)**. Las métricas del header (Boletas, Total
+  período, Duplicados en la pestaña Boletas; Pagos registrados y Saldo
+  impago en Pagos) ahora se calculan sobre el período completo, no
+  sobre el subset filtrado por el buscador. CSS: el `.statsStrip` dejó
+  de ser un contenedor único — cada `.statCard` tiene su propio border
+  y background, todos en una fila con `gap: 10px`.
+  Archivos: `src/app/admin/consortiums/page.tsx`,
+  `src/app/admin/consortiums/page.module.css`.
+
+- **Medio de pago del modal: input libre → dropdown (2026-05-25)**.
+  El campo "Medio de pago" del modal de cuotas pasó de `<input type=text>`
+  a `<select>` con las mismas 3 opciones que el inline (Débito automático,
+  Transferencia, Efectivo). Ambos selects usan placeholder "Elija una
+  opción" (option vacía `disabled hidden`).
+  Archivo: `src/app/admin/consortiums/page.tsx`.
+
+- **Toggle del modal: "Pagar en cuotas" → "Cuotas fijas" (2026-05-25)**.
+  Más claro respecto al modo (monto auto-calculado por N cuotas).
+  Archivo: `src/app/admin/consortiums/page.tsx`.
+
+- **Medios de pago simplificados + botón "Cuotas" (2026-05-25)**. En el
+  dropdown de Medio de Pago de la pestaña Pagos quedan solo 3 opciones
+  genéricas: Débito automático, Transferencia, Efectivo. Se sacaron las
+  variantes con banco y "Descuento". El botón "Pagar" de la columna
+  Acciones se renombró a "Cuotas" — abre el modal para pagos en cuotas
+  (fijas o variables); los pagos únicos se cargan inline en la fila.
+  Prop `consortiumBank` removida de PagosView (ya no se usa).
+  Archivo: `src/app/admin/consortiums/page.tsx`.
+
+- **Buscadores unificados — sin matching por detalle (2026-05-25)**.
+  Boletas y Pagos ahora filtran por `provider + boletaNumber + CUIT` con
+  el mismo placeholder. Se sacó el match por `detail` (poco usado y
+  ruidoso). Archivo: `src/app/admin/consortiums/page.tsx`.
+
+- **Scroll vertical en tablas con header sticky (2026-05-25)**. `.tableWrap`
+  ahora tiene `max-height: 65vh` y `overflow: auto`; el `<thead>` queda
+  pegado arriba al scrollear. Aplica a Boletas, Pagos y "Ver pagos".
+  Archivo: `src/app/admin/consortiums/page.module.css`.
+
+- **Stats inline en una sola línea (2026-05-25)**. Las 4 stat cards de
+  la pestaña Boletas (Boletas, Total período, Duplicados, Rubros) estaban
+  en un grid 4×1 con cada card grande (label arriba 11px, valor abajo
+  22px), ocupando ~80px verticales. Ahora viven en una sola barra
+  horizontal compacta (`.statsStrip` pasó de `display: grid` a
+  `display: flex; flex-wrap: wrap`) con label y valor inline en baseline.
+  Cada item es `.statCard` con `display: inline-flex; gap: 8px` (label +
+  valor). El contenedor mantiene `background` y `border-radius`. En
+  mobile (`max-width: 768px`) reduce gap y padding; ya no hace falta
+  cambiar el grid-template-columns. Total: ~50px menos de altura.
+  Archivos: `src/app/admin/consortiums/page.module.css`.
+
+- **Buscador en pestaña Pagos (2026-05-25)**. La pestaña Boletas tenía
+  un input de búsqueda (proveedor / N° boleta / detalle), Pagos no. Se
+  agregó el mismo widget (`.searchRow` + `.searchInput` + `.clearSearch`)
+  en PagosView con state local `search` independiente del de Boletas
+  (cada pestaña tiene su contexto de búsqueda). Filtra por nombre de
+  proveedor y N° de comprobante. Empty state diferenciado: "No hay
+  boletas que coincidan con la búsqueda" vs "No hay boletas para este
+  período". Los totales del header (Pagos registrados, Saldo impago)
+  se calculan sobre el subset filtrado — útil para ver el saldo que
+  debe un proveedor específico al buscarlo.
+  Archivos: `src/app/admin/consortiums/page.tsx`.
+
+- **Navegador de período al lado del nombre del consorcio (2026-05-25)**.
+  El bloque `‹ Mes Año ›` vivía debajo de la sección de Servicios públicos
+  (LSP), forzando un scroll para cambiar de período. Se movió al
+  `detailHeader`, inline al lado del título del consorcio, dentro de una
+  nueva fila `.detailTitleRow` (flex con gap 18px, wrap habilitado para
+  pantallas chicas). Ahora cambiar de mes es 1 click sin scroll.
+  Archivos: `src/app/admin/consortiums/page.tsx`,
+  `src/app/admin/consortiums/page.module.css`.
+
+- **Sección Servicios públicos (LSP) colapsable (2026-05-25)**. El bloque
+  ocupaba ~5 renglones fijos (título + tabla + formulario de alta) en
+  todos los consorcios, aunque la mayoría del tiempo no se necesita
+  interactuar (los servicios ya están cargados desde el archivo ALTA).
+  Ahora el `<h3>` es un botón toggle (`.lspToggle`) con chevron `▸/▾` y
+  badge contador con la cantidad de servicios. **Default cerrado** —
+  el usuario expande on-demand para ver, agregar o eliminar. El form de
+  alta también queda oculto hasta expandir, lo cual evita clicks
+  accidentales. Estado local `lspCollapsed` (session-only).
+  Archivos: `src/app/admin/consortiums/page.tsx`,
+  `src/app/admin/consortiums/page.module.css`.
+
+- **Eliminación del toolbar superior en /admin/consortiums (2026-05-25)**.
+  Se quitó por completo el `<div className={styles.toolbar}>` que ocupaba
+  una franja horizontal arriba del contenido principal. Antes contenía:
+  hamburger (mobile), mensajes de feedback (toolbarInfo/toolbarError) y
+  toggle de tema (sol/luna). Tras las iteraciones previas (botones del
+  scheduler movidos al sidebar), el toolbar quedó casi vacío y solo
+  comía altura útil de la tabla. Lo que se hizo con cada elemento:
+  - **Toggle de tema**: eliminado. El cambio de tema vive solo en el
+    panel principal (`/admin`), que ya tiene su propio botón "Modo
+    claro/oscuro". Al cargar `/admin/consortiums` se respeta el
+    `data-theme` que haya dejado el panel principal (lectura del
+    atributo en `document.documentElement` al mount).
+  - **Hamburger menu** (`☰`): reubicado como **botón flotante**
+    (`position: fixed`, top-left) en una nueva clase `.fabHamburger`,
+    visible solo en `max-width: 1024px`. En desktop el sidebar
+    izquierdo siempre está visible, así que no hace falta.
+  - **Mensajes de feedback**: convertidos en **toast flotante**
+    arriba-derecha (`.toastContainer` + `.toastItem`) con
+    autodismiss (4s info, 5s error) y animación slide-in. Antes los
+    mensajes quedaban pegados en el toolbar hasta la próxima acción.
+  Archivos: `src/app/admin/consortiums/page.tsx`,
+  `src/app/admin/consortiums/page.module.css`.
+
+- **Fix NaN + simplificación de headers en pestaña Pagos (2026-05-25)**.
+  Los totales del header (Total del período / Pagos del mes actual /
+  Saldo impago) mostraban `$ NaN` porque Prisma serializa `Decimal` como
+  string y `string + 0` concatena en vez de sumar — el `reduce` armaba
+  `"65000.2665000.08…"` y `Intl.format` no podía parsearlo. Se agregó un
+  helper `toNum()` que convierte explícitamente (con guarda `isFinite`)
+  y se recalcularon las métricas con semántica correcta:
+  - **Pagos registrados** = `amount - remainingBalance` por boleta
+    (refleja pagos parciales reales, antes simplemente sumaba `amount`
+    de las boletas marcadas `isPaid`, lo cual ignoraba pagos en cuotas).
+  - **Saldo impago del período** = suma de `remainingBalance` (o
+    `amount` si nunca se pagó nada) de las boletas no pagadas.
+
+  Además se eliminó la métrica "Total del período" porque era redundante
+  con la stat card "TOTAL PERÍODO" de la pestaña Boletas. Se renombró
+  "Pagos del mes actual" → "Pagos registrados" (más preciso: cuenta
+  pagos del período seleccionado, no del mes calendario).
+  Archivos: `src/app/admin/consortiums/page.tsx`.
+
+- **Botones del scheduler movidos del toolbar al sidebar (2026-05-25)**.
+  Los botones "Pausar scheduler" / "Encender scheduler" y "Ejecutar ahora"
+  vivían en el toolbar superior, ocupando espacio visual encima de la
+  tabla principal. Se movieron al sidebar colapsable izquierdo, agrupados
+  arriba del botón "Cerrar sesión" y separados por un divisor. El toolbar
+  ahora solo conserva el hamburger menu (mobile) y los mensajes de
+  feedback (toolbarInfo / toolbarError). Mantienen los mismos handlers
+  (`handleToggleScheduler`, `handleRunNow`) y reaccionan al mismo estado
+  (`paused`, `schedulerEnabled`, `busyAction`). Iconos: ⏸️/▶️ para el
+  toggle y ⚡ para ejecutar ahora.
+  Archivos: `src/app/admin/consortiums/page.tsx`.
+
+- **Separación de responsabilidades entre pestañas Boletas y Pagos
+  (2026-05-25)**. La tabla de la pestaña **Boletas** ya no muestra los
+  botones "Pagar" / "Ver pagos" en la columna PAGO — solo conserva el
+  indicador visual de estado (`Pagada` / `Resta $X` / `—`). Los botones
+  de acción se movieron a una nueva columna **ACCIONES** al final de la
+  tabla de la pestaña **Pagos**, donde conviven con el flujo inline
+  existente (carga rápida fecha/importe/medio + botón GUARDAR al pie).
+  Motivo: el botón duplicado en Boletas generaba confusión sobre dónde
+  cargar pagos. Ahora cada pestaña tiene una sola responsabilidad clara:
+  Boletas = datos de boletas, Pagos = gestión de pagos. Los modales
+  (cuotas/libre y "Ver pagos") siguen activos, solo cambia el entry
+  point. Archivos: `src/app/admin/consortiums/page.tsx`.
+
 ### Security / CI
 - **Healthcheck real con verificación de DB (2026-05-25)**. Nuevo endpoint
   `GET /api/health` que ejecuta `prisma.$queryRaw\`SELECT 1\`` con timeout
