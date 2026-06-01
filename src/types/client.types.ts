@@ -22,6 +22,13 @@ export interface ClientDriveFolders {
   pending?: string | null;
   scanned?: string | null;
   unassigned?: string | null;
+  /**
+   * Carpeta para archivos que necesitan revisión manual. En Drive se la
+   * suele llamar "Revisión" (más amigable para el cliente). Es el destino
+   * cuando se elimina una boleta desde la UI — el archivo NO debe volver
+   * a `pending` porque el scheduler lo re-procesaría y crearía la misma
+   * boleta de nuevo.
+   */
   failed?: string | null;
   receipts?: string | null;
   processing?: string | null;

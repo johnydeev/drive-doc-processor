@@ -10,7 +10,7 @@
  *
  * Opcionales:
  *   --unassigned=<FOLDER_ID>
- *   --failed=<FOLDER_ID>
+ *   --failed=<FOLDER_ID>     también destino al eliminar boletas desde la UI ("Revisión")
  *   --receipts=<FOLDER_ID>
  */
 

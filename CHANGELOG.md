@@ -2,7 +2,31 @@
 
 ## [Unreleased]
 
+### CI / Ops
+- **Export de logs antes del rebuild + upload como artifact (2026-05-25)**.
+  Nuevo step en el job `deploy` que ejecuta `scripts/export-logs.ps1`
+  (ya existente) antes de `docker compose up --force-recreate`. Genera
+  `logs/<timestamp>_<service>.txt` para web, worker y scheduler de las
+  últimas 72h. El siguiente step usa `actions/upload-artifact@v4` para
+  subir esos .txt como artifact (`docker-logs-<sha>`, retención 14d),
+  así quedan accesibles desde la pestaña Actions del repo aunque el
+  runner se reinicie o pisemos `logs/` en el próximo deploy.
+  Best-effort (`continue-on-error: true`) — si no hay containers
+  previos, el step pasa sin abortar el deploy.
+  Archivo: `.github/workflows/ci.yml`.
+
 ### Features
+- **Destino del archivo al eliminar boleta: `failed` (Revisión) en vez de
+  `pending` (2026-05-25, corrección)**. El PDF iba originalmente a la
+  carpeta `pending`, lo cual hacía que el scheduler lo re-procesara y
+  creara la misma boleta de nuevo. La carpeta correcta es la que el
+  schema llama `failed` y en Drive se muestra como "Revisión" (nombre
+  más amigable que ya estaba en uso). Endpoint DELETE invoice ahora
+  mueve a `folders.failed`; si el cliente no la tiene configurada, el
+  archivo se deja donde estaba y la respuesta incluye `warning`.
+  Archivos: `src/types/client.types.ts` (doc del campo `failed`),
+  `src/app/api/client/consortiums/[id]/invoices/[invoiceId]/route.ts`.
+
 - **Eliminación de boletas y pagos desde la UI (2026-05-25)**. Dos endpoints
   nuevos y dos controles inline (ícono 🗑 + confirm "¿Borrar? Sí/No"):
   - `DELETE /api/client/consortiums/[id]/invoices/[invoiceId]` — elimina

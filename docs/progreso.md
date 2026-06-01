@@ -45,6 +45,18 @@ Actualizado al 25/05/2026 (sesión 26).
   button con chevron `▸/▾`, título y badge contador. Default cerrado para
   ahorrar espacio. Contenido (tabla + form) se monta on-demand.
 
+**CI — export de logs antes del rebuild:**
+- Step nuevo en `deploy` que llama `scripts/export-logs.ps1` antes del
+  `docker compose up --force-recreate`. Genera `logs/<timestamp>_<svc>.txt`.
+- Step subsiguiente sube los .txt como artifact (`upload-artifact@v4`)
+  con retención 14d. Best-effort (`continue-on-error: true`).
+
+**Corrección — destino al eliminar boleta:**
+- Carpeta destino: `failed` (en Drive se muestra como "Revisión"). NO
+  `pending` — evita re-proceso del scheduler que duplicaría la boleta.
+- Si `folders.failed` no está configurada, el archivo se queda donde
+  estaba y la respuesta incluye `warning`.
+
 **Feature — eliminar boletas y pagos desde UI:**
 - `DELETE /api/client/consortiums/[id]/invoices/[invoiceId]`: bloquea
   si tiene pagos, mueve PDF Drive scanned→pending, trashea Receipt

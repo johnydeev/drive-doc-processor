@@ -113,18 +113,24 @@ export async function DELETE(
     const folders = resolveFolders(processingClient);
     const driveService = new GoogleDriveService(googleConfig);
 
-    // ── 4. Mover PDF de Drive scanned → pending (o unassigned → pending) ──
-    // Operación atómica: si esto falla, abortamos antes de tocar DB.
-    if (invoice.driveFileId && folders.pending) {
+    // ── 4. Mover PDF a la carpeta de Revisión (driveFoldersJson.failed) ────
+    // NO se manda a `pending` porque el scheduler lo re-procesaría y crearía
+    // la misma boleta de nuevo. La carpeta `failed` internamente se muestra
+    // como "Revisión" en Drive y es el destino correcto para inspección
+    // manual. Si el cliente no la tiene configurada, el archivo se deja
+    // donde estaba y la respuesta incluye un warning.
+    let driveWarning: string | null = null;
+    if (invoice.driveFileId && folders.failed) {
       try {
         const parents = await driveService.getFileParents(invoice.driveFileId);
         const fromFolderId =
           parents.find((p) => p === folders.scanned) ??
           parents.find((p) => p === folders.unassigned) ??
+          parents.find((p) => p === folders.pending) ??
           parents[0];
 
-        if (fromFolderId && fromFolderId !== folders.pending) {
-          await driveService.moveFileToFolder(invoice.driveFileId, fromFolderId, folders.pending);
+        if (fromFolderId && fromFolderId !== folders.failed) {
+          await driveService.moveFileToFolder(invoice.driveFileId, fromFolderId, folders.failed);
         }
       } catch (err) {
         return NextResponse.json(
@@ -135,6 +141,9 @@ export async function DELETE(
           { status: 502 }
         );
       }
+    } else if (invoice.driveFileId && !folders.failed) {
+      driveWarning =
+        "Sin carpeta `failed` (Revisión) configurada — el archivo de Drive quedó donde estaba. Configurá driveFoldersJson.failed para que las eliminaciones lo muevan a Revisión.";
     }
 
     // ── 5. Borrar receipt manual del Drive (si existe) ────────────────────
@@ -184,7 +193,7 @@ export async function DELETE(
       await tx.invoice.delete({ where: { id: invoiceId } });
     });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, ...(driveWarning ? { warning: driveWarning } : {}) });
   } catch (err) {
     console.error("[invoice-delete]", err instanceof Error ? err.message : err);
     return NextResponse.json(

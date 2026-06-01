@@ -103,6 +103,36 @@ jobs:
           username: johnydeev
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Exporta los logs de los containers actuales a ./logs/ antes de tirarlos
+      # abajo. Si el deploy revienta o un worker tira un stack útil, el siguiente
+      # `up --force-recreate` borra el container y sus logs — esta exportación
+      # los conserva. El script existe desde antes (uso manual con
+      # `pwsh scripts/export-logs.ps1`).
+      # Best-effort: si los containers no existen (primer deploy, runner limpio,
+      # etc.) el script puede no producir nada y no debe abortar el deploy.
+      - name: Export current logs before rebuild
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if (Test-Path .\scripts\export-logs.ps1) {
+            & .\scripts\export-logs.ps1 -Since 72h
+          } else {
+            Write-Host "::warning::scripts/export-logs.ps1 no encontrado; salto exportación."
+          }
+
+      # Sube los .txt como artifact para que queden disponibles en la run de GHA
+      # aunque el runner se reinicie o se borre ./logs/ en el próximo deploy.
+      # Retención corta (14 días) — los logs ya viven también en el runner.
+      - name: Upload logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-logs-${{ github.sha }}
+          path: logs/*.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
       # Crítica #1: aborta el script si cualquier comando falla. PowerShell con
       # $ErrorActionPreference='Stop' solo cubre cmdlets — los exit codes de
       # native commands (docker, npx) hay que chequearlos manualmente con
